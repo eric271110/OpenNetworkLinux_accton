@@ -29,9 +29,28 @@
 #include "x86_64_accton_as5916_54xl_int.h"
 #include "x86_64_accton_as5916_54xl_log.h"
 
+#define SFP_PORT_MIN 0
+#define SFP_PORT_MAX 47
+#define QSFP_PORT_MIN 48
+#define QSFP_PORT_MAX 53
+#define MIN_PORT SFP_PORT_MIN
+#define MAX_PORT QSFP_PORT_MAX
+
+#define VALIDATE_SFP(_port) \
+    do { \
+        if (_port < SFP_PORT_MIN || _port > SFP_PORT_MAX) \
+            return ONLP_STATUS_E_UNSUPPORTED; \
+    } while(0)
+
 #define VALIDATE_QSFP(_port) \
     do { \
-        if (_port < 48 || _port > 53 ) \
+        if (_port < QSFP_PORT_MIN || _port > QSFP_PORT_MAX) \
+            return ONLP_STATUS_E_UNSUPPORTED; \
+    } while(0)
+
+#define VALIDATE_PORT(_port) \
+    do { \
+        if (_port < MIN_PORT || _port > MAX_PORT ) \
             return ONLP_STATUS_E_UNSUPPORTED; \
     } while(0)
 

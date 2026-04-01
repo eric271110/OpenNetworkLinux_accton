@@ -29,15 +29,27 @@
 #include "x86_64_accton_as7535_28xb_int.h"
 #include "x86_64_accton_as7535_28xb_log.h"
 
+#define SFP_PORT_MIN 4
+#define SFP_PORT_MAX 27
+#define QSFP_PORT_MIN 0
+#define QSFP_PORT_MAX 3
+#define MIN_PORT QSFP_PORT_MIN
+#define MAX_PORT SFP_PORT_MAX
 #define VALIDATE_SFP(_port) \
     do { \
-        if (_port < 4 || _port > 27) \
+        if (_port < SFP_PORT_MIN || _port > SFP_PORT_MAX) \
             return ONLP_STATUS_E_UNSUPPORTED; \
     } while(0)
 
 #define VALIDATE_QSFP(_port) \
     do { \
-        if (_port < 0 || _port > 3) \
+        if (_port < QSFP_PORT_MIN || _port > QSFP_PORT_MAX) \
+            return ONLP_STATUS_E_UNSUPPORTED; \
+    } while(0)
+
+#define VALIDATE_PORT(_port) \
+    do { \
+        if (_port < MIN_PORT || _port > MAX_PORT ) \
             return ONLP_STATUS_E_UNSUPPORTED; \
     } while(0)
 
@@ -71,6 +83,9 @@ static const int port_bus_index[NUM_OF_SFP_PORT] = {
 
 #define PORT_BUS_INDEX(port) (port_bus_index[port])
 
+/*QSFP tx_disable*/
+#define PORT_EEPROM_DEVADDR             0x50
+#define QSFP_EEPROM_OFFSET_TXDIS        0x56
 /************************************************************
  *
  * SFPI Entry Points
@@ -290,16 +305,34 @@ onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
     int present = 0;
     int mbit_identifier;
     int mbit_value;
-    switch(control) {
-    case ONLP_SFP_CONTROL_TX_DISABLE: {
-        VALIDATE_SFP(port);
 
-        if (onlp_file_write_int(value, MODULE_TXDISABLE_FORMAT, (port+1)) < 0) {
-            AIM_LOG_ERROR("Unable to set tx_disable status to port(%d)\r\n", port);
-            return ONLP_STATUS_E_INTERNAL;
+    VALIDATE_PORT(port);
+
+    switch(control) {
+    case ONLP_SFP_CONTROL_TX_DISABLE:
+    case ONLP_SFP_CONTROL_TX_DISABLE_CHANNEL: {
+        present = onlp_sfpi_is_present(port);
+        if(present == 1) {
+            if(port >= SFP_PORT_MIN && port <= SFP_PORT_MAX) { //SFP
+
+                if (onlp_file_write_int(value, MODULE_TXDISABLE_FORMAT, (port+1)) < 0) {
+                    AIM_LOG_ERROR("Unable to set tx_disable status to port(%d)\r\n", port);
+                    return ONLP_STATUS_E_INTERNAL;
+                }
+                else {
+                    return ONLP_STATUS_OK;
+                }
+            }
+            else { //QSFP
+                /* txdis valid bit(bit0-bit3), xxxx 1111 */
+                value = value & 0xf;
+                onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_TXDIS, value);
+
+                return ONLP_STATUS_OK;
+            }
         }
         else {
-            return ONLP_STATUS_OK;
+            return ONLP_STATUS_E_INTERNAL;
         }
         break;
     }
@@ -371,6 +404,9 @@ onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
     int present = 0;
     int multirate = 0;
     int mbit_identifier;
+
+    VALIDATE_PORT(port);
+
     switch(control) {
     case ONLP_SFP_CONTROL_RX_LOS: {
         VALIDATE_SFP(port);
@@ -394,11 +430,25 @@ onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
         return ONLP_STATUS_OK;
     }
 
-    case ONLP_SFP_CONTROL_TX_DISABLE: {
-        VALIDATE_SFP(port);
+    case ONLP_SFP_CONTROL_TX_DISABLE:
+    case ONLP_SFP_CONTROL_TX_DISABLE_CHANNEL: {
+        present = onlp_sfpi_is_present(port);
+        if(present == 1) {
+            if(port >= SFP_PORT_MIN && port <= SFP_PORT_MAX) { //SFP
 
-        if (onlp_file_read_int(value, MODULE_TXDISABLE_FORMAT, (port+1)) < 0) {
-            AIM_LOG_ERROR("Unable to read tx_disabled status from port(%d)\r\n", port);
+                if (onlp_file_read_int(value, MODULE_TXDISABLE_FORMAT, (port+1)) < 0) {
+                    AIM_LOG_ERROR("Unable to read tx_disabled status from port(%d)\r\n", port);
+                    return ONLP_STATUS_E_INTERNAL;
+                }
+            }
+            else { //QSFP
+                /* txdis valid bit(bit0-bit3), xxxx 1111 */
+                *value = onlp_sfpi_dev_readb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_TXDIS);
+
+                return ONLP_STATUS_OK;
+            }
+        }
+        else {
             return ONLP_STATUS_E_INTERNAL;
         }
 

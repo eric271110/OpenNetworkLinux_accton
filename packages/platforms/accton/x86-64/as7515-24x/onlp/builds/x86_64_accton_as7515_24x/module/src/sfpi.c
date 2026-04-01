@@ -30,15 +30,28 @@
 #include "x86_64_accton_as7515_24x_log.h"
 #include "platform_lib.h"
 
+#define SFP_PORT_MIN 4
+#define SFP_PORT_MAX 23
+#define QSFP_PORT_MIN 0
+#define QSFP_PORT_MAX 3
+#define MIN_PORT QSFP_PORT_MIN
+#define MAX_PORT SFP_PORT_MAX
+
 #define VALIDATE_SFP(_port) \
     do { \
-        if (_port < 4 || _port > 23) \
+        if (_port < SFP_PORT_MIN || _port > SFP_PORT_MAX) \
             return ONLP_STATUS_E_UNSUPPORTED; \
     } while(0)
 
 #define VALIDATE_QSFP(_port) \
     do { \
-        if (_port < 0 || _port > 3 ) \
+        if (_port < QSFP_PORT_MIN || _port > QSFP_PORT_MAX ) \
+            return ONLP_STATUS_E_UNSUPPORTED; \
+    } while(0)
+
+#define VALIDATE_PORT(_port) \
+    do { \
+        if (_port < MIN_PORT || _port > MAX_PORT ) \
             return ONLP_STATUS_E_UNSUPPORTED; \
     } while(0)
 
@@ -60,6 +73,9 @@ static const int port_bus_index[NUM_OF_SFP_PORT] = {
 
 #define PORT_BUS_INDEX(port) (port_bus_index[port])
 
+/*QSFP tx_disable*/
+#define PORT_EEPROM_DEVADDR             0x50
+#define QSFP_EEPROM_OFFSET_TXDIS        0x56
 /************************************************************
  *
  * SFPI Entry Points
@@ -298,15 +314,32 @@ onlp_sfpi_dev_writew(int port, uint8_t devaddr, uint8_t addr, uint16_t value)
 int
 onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
 {
-    switch(control) {
-    case ONLP_SFP_CONTROL_TX_DISABLE: {
-        VALIDATE_SFP(port);
+    int present;
 
-        if (onlp_file_write_int(value, MODULE_TXDISABLE_FORMAT, port+1) < 0) {
-            AIM_LOG_ERROR("Unable to set tx_disable status to port(%d)\r\n", port);
+    VALIDATE_PORT(port);
+
+    switch(control) {
+    case ONLP_SFP_CONTROL_TX_DISABLE:
+    case ONLP_SFP_CONTROL_TX_DISABLE_CHANNEL: {
+        present = onlp_sfpi_is_present(port);
+        if(present == 1) {
+            if(port >= SFP_PORT_MIN && port <= SFP_PORT_MAX) { //SFP
+                if (onlp_file_write_int(value, MODULE_TXDISABLE_FORMAT, port+1) < 0) {
+                    AIM_LOG_ERROR("Unable to set tx_disable status to port(%d)\r\n", port);
+                    return ONLP_STATUS_E_INTERNAL;
+                }
+            }
+            else { //QSFP
+                /* txdis valid bit(bit0-bit3), xxxx 1111 */
+                value = value & 0xf;
+                onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_TXDIS, value);
+
+                return ONLP_STATUS_OK;
+            }
+        }
+        else {
             return ONLP_STATUS_E_INTERNAL;
         }
-
         return ONLP_STATUS_OK;
     }
     case ONLP_SFP_CONTROL_RESET_STATE: {
@@ -339,6 +372,10 @@ onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
 int
 onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
 {
+    int present = 0;
+
+    VALIDATE_PORT(port);
+
     *value = 0;
 
     switch(control) {
@@ -364,11 +401,26 @@ onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
         return ONLP_STATUS_OK;
     }
 
-    case ONLP_SFP_CONTROL_TX_DISABLE: {
-        VALIDATE_SFP(port);
+    case ONLP_SFP_CONTROL_TX_DISABLE:
+    case ONLP_SFP_CONTROL_TX_DISABLE_CHANNEL: {
+        present = onlp_sfpi_is_present(port);
+        if(present == 1) {
+            if(port >= SFP_PORT_MIN && port <= SFP_PORT_MAX) { //SFP
 
-        if (onlp_file_read_int(value, MODULE_TXDISABLE_FORMAT, port+1) < 0) {
-            AIM_LOG_ERROR("Unable to read tx_disabled status from port(%d)\r\n", port);
+                if (onlp_file_read_int(value, MODULE_TXDISABLE_FORMAT, port+1) < 0) {
+                    AIM_LOG_ERROR("Unable to read tx_disabled status from port(%d)\r\n", port);
+                    return ONLP_STATUS_E_INTERNAL;
+                }
+            }
+            else { //QSFP
+                /* txdis valid bit(bit0-bit3), xxxx 1111 */
+                *value = onlp_sfpi_dev_readb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_TXDIS);
+
+                return ONLP_STATUS_OK;
+
+            }
+        }
+        else {
             return ONLP_STATUS_E_INTERNAL;
         }
 
