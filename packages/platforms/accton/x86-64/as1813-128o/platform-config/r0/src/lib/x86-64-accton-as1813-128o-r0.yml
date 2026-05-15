@@ -1,0 +1,31 @@
+---
+
+######################################################################
+#
+# platform-config for AS1813-128O
+#
+######################################################################
+
+x86-64-accton-as1813-128o-r0:
+
+  grub:
+
+    serial: >-
+      --port=0x3f8
+      --speed=115200
+      --word=8
+      --parity=no
+      --stop=1
+
+    kernel:
+      <<: *kernel-6-1
+
+    args: >-
+      console=ttyS0,115200n8
+      intel_iommu=off pcie_aspm=off
+
+  network:
+    interfaces:
+      ma1:
+        name: eth3
+  ##      syspath: pci0000:00/0000:00:02.5/0000:07:00.0
