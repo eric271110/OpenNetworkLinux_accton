@@ -82,6 +82,7 @@ class OnlPlatform_x86_64_accton_as1813_128o_r0(OnlPlatformAccton,
 
         self.modprobe('optoe')
         self.modprobe('at24')
+        self.modprobe('k10temp')
 
         #for m in [ 'i2c-ocores', 'fpga', 'fan', 'psu', 'thermal', 'sys', 'leds' ]:
         for m in [ 'i2c-ocores', 'fpga' ]:

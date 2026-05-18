@@ -36,6 +36,7 @@
 
 static char* devfiles__[] = { /* must map with onlp_thermal_id */
     NULL,
+    NULL,                  /* CPU_CORE files */
     "/sys/devices/platform/as1813_128o_thermal*temp1_input",
     "/sys/devices/platform/as1813_128o_thermal*temp2_input",
     "/sys/devices/platform/as1813_128o_thermal*temp3_input",
@@ -65,66 +66,75 @@ static char* devfiles__[] = { /* must map with onlp_thermal_id */
     "/sys/devices/platform/as1813_128o_psu.3*psu4_temp3_input"
 };
 
+static char* cpu_coretemp_files[] = {
+    "/sys/bus/pci/drivers/k10temp/*/hwmon/hwmon*/temp1_input",
+    NULL,
+};
+
 /* Static values */
 static onlp_thermal_info_t tinfo[] = {
     { }, /* Not used */
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_1_ON_MAIN_BROAD), "CB_FrontRight_temp(0x48)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_CPU_CORE), "CPU Core", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_2_ON_MAIN_BROAD), "MB_RearLeft_temp(0x48)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_1_ON_MAIN_BROAD), "MZB_FrontLeft_temp(0x48)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_3_ON_MAIN_BROAD), "MB_FrontRight_temp(0x49)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_2_ON_MAIN_BROAD), "MZB_FrontRight_temp(0x48)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_4_ON_MAIN_BROAD), "MB_RearRight_temp(0x4A)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_3_ON_MAIN_BROAD), "MZB_FrontLeft_temp(0x48)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_5_ON_MAIN_BROAD), "MB_RearCenter_temp(0x4B)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_4_ON_MAIN_BROAD), "MZB_FrontRight_temp(0x48)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_6_ON_MAIN_BROAD), "MB_FrontCenter_temp(0x4C)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_5_ON_MAIN_BROAD), "MB_RearLeft_temp(0x48)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_7_ON_MAIN_BROAD), "MB_RearCenter_temp(0x4D)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_6_ON_MAIN_BROAD), "MB_FrontRight_temp(0x49)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_8_ON_MAIN_BROAD), "MZB_FrontRight_temp(0x48)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_7_ON_MAIN_BROAD), "MB_RearRight_temp(0x4A)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_9_ON_MAIN_BROAD), "MZB_FrontLeft_temp(0x48)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_8_ON_MAIN_BROAD), "MB_RearCenter_temp(0x4B)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_10_ON_MAIN_BROAD), "MZB_FrontRight_temp(0x48)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_9_ON_MAIN_BROAD), "MB_FrontCenter_temp(0x4C)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_11_ON_MAIN_BROAD), "MZB_FrontLeft_temp(0x48)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_10_ON_MAIN_BROAD), "MB_RearCenter_temp(0x4D)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_12_ON_MAIN_BROAD), "FCM0_temp(0x4D)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_11_ON_MAIN_BROAD), "CB_FrontRight_temp(0x48)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_13_ON_MAIN_BROAD), "FCM0_temp(0x4E)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_12_ON_MAIN_BROAD), "FAN_TOP_temp(0x4D)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_14_ON_MAIN_BROAD), "FCM1_temp(0x4D)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_13_ON_MAIN_BROAD), "FAN_TOP_temp(0x4E)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
-    {   { ONLP_THERMAL_ID_CREATE(THERMAL_15_ON_MAIN_BROAD), "FCM1_temp(0x4E)", 0, {0} },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_14_ON_MAIN_BROAD), "FAN_BOT_temp(0x4D)", 0, {0} },
+        ONLP_THERMAL_STATUS_PRESENT,
+        ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
+    },
+    {   { ONLP_THERMAL_ID_CREATE(THERMAL_15_ON_MAIN_BROAD), "FAN_BOT_temp(0x4E)", 0, {0} },
         ONLP_THERMAL_STATUS_PRESENT,
         ONLP_THERMAL_CAPS_ALL, 0, ONLP_THERMAL_THRESHOLD_INIT_DEFAULTS
     },
@@ -205,6 +215,10 @@ onlp_thermali_info_get(onlp_oid_t id, onlp_thermal_info_t* info)
 
     tid = ONLP_OID_ID_GET(id);
     *info = tinfo[tid];
+
+    if (tid == THERMAL_CPU_CORE) {
+        return onlp_file_read_int_max(&info->mcelsius, cpu_coretemp_files);
+    }
 
     return onlp_file_read_int(&info->mcelsius, devfiles__[tid]);
 }

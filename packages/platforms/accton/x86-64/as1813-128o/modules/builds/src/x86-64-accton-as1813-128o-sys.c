@@ -42,12 +42,12 @@
 #define EEPROM_SIZE             256 /*  256 byte eeprom */
 
 #define IPMI_CPLD_READ_CMD             0x20 //need to check
-#define IPMI_CPLD_COM_E_CMD            0x21 //need to check
-#define IPMI_CPLD_1U_FAN_CMD           0x34 //need to check
-#define IPMI_CPLD_2U_FAN_CMD           0x33 //need to check
-#define IPMI_CPLD_FPGA_CMD             0x61 //need to check
-#define IPMI_CPLD_MB_CPLD0_CMD         0x62 //need to check
-#define IPMI_CPLD_MB_CPLD1_CMD         0x63 //need to check
+#define IPMI_CPLD_COM_E_IDX            0 //need to check
+#define IPMI_CPLD_FPGA_IDX             1 //need to check
+#define IPMI_CPLD_SYS_IDX              2 //need to check
+#define IPMI_CPLD_FCM0_FAN_IDX         3 //need to check
+#define IPMI_CPLD_FCM1_FAN_IDX         4 //need to check
+
 
 static int as1813_128o_sys_probe(struct platform_device *pdev);
 static int as1813_128o_sys_remove(struct platform_device *pdev);
@@ -61,6 +61,7 @@ struct as1813_128o_sys_data {
     struct ipmi_data ipmi;
     unsigned char    ipmi_resp_eeprom[EEPROM_SIZE];
     unsigned char    ipmi_resp_cpld[2];
+    unsigned char    ipmi_res_com_e_cpld[4];
     unsigned char    ipmi_tx_data[2];
     struct bin_attribute eeprom;      /* eeprom data */
 };
@@ -79,24 +80,21 @@ static struct platform_driver as1813_128o_sys_driver = {
 enum as5916_54xks_sys_sysfs_attrs {
     CPU_CPLD,
     MB_FPGA,
-    MB_CPLD0,
-    MB_CPLD1,
+    MB_SYS,
     FAN_CPLD1,
     FAN_CPLD2
 };
 /* Functions to talk to the IPMI layer */
 static SENSOR_DEVICE_ATTR(cpu_cpld_ver, S_IRUGO, show_cpld_version, NULL, CPU_CPLD);
 static SENSOR_DEVICE_ATTR(fpga_ver, S_IRUGO, show_cpld_version, NULL, MB_FPGA);
-static SENSOR_DEVICE_ATTR(mb_cpld0_ver, S_IRUGO, show_cpld_version, NULL, MB_CPLD0);
-static SENSOR_DEVICE_ATTR(mb_cpld1_ver, S_IRUGO, show_cpld_version, NULL, MB_CPLD1);
+static SENSOR_DEVICE_ATTR(sys_ver, S_IRUGO, show_cpld_version, NULL, MB_SYS);
 static SENSOR_DEVICE_ATTR(fan_cpld1_ver, S_IRUGO, show_cpld_version, NULL, FAN_CPLD1);
 static SENSOR_DEVICE_ATTR(fan_cpld2_ver, S_IRUGO, show_cpld_version, NULL, FAN_CPLD2);
 
 static struct attribute *as1813_128o_sys_attributes[] = {
     &sensor_dev_attr_cpu_cpld_ver.dev_attr.attr,
     &sensor_dev_attr_fpga_ver.dev_attr.attr,
-    &sensor_dev_attr_mb_cpld0_ver.dev_attr.attr,
-    &sensor_dev_attr_mb_cpld1_ver.dev_attr.attr,
+    &sensor_dev_attr_sys_ver.dev_attr.attr,
     &sensor_dev_attr_fan_cpld1_ver.dev_attr.attr,
     &sensor_dev_attr_fan_cpld2_ver.dev_attr.attr,
     NULL
@@ -194,16 +192,25 @@ static int sysfs_eeprom_cleanup(struct kobject *kobj, struct bin_attribute *eepr
     return 0;
 }
 
-static struct as1813_128o_sys_data *as1813_128o_sys_update_cpld_ver(unsigned char cpld_addr)
+static struct as1813_128o_sys_data *as1813_128o_sys_update_cpld_ver(unsigned char cpld_idx)
 {
     int status = 0;
 
     data->valid = 0;
-    data->ipmi_tx_data[0] = cpld_addr;
-    status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_CPLD_READ_CMD,
-                                data->ipmi_tx_data, 1,
-                                data->ipmi_resp_cpld,
-                                sizeof(data->ipmi_resp_cpld));
+    data->ipmi_tx_data[0] = cpld_idx;
+    if(cpld_idx == IPMI_CPLD_COM_E_IDX){
+        status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_CPLD_READ_CMD,
+                                    data->ipmi_tx_data, 1,
+                                    data->ipmi_res_com_e_cpld,
+                                    sizeof(data->ipmi_res_com_e_cpld));
+        }
+    else {
+        status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_CPLD_READ_CMD,
+                                    data->ipmi_tx_data, 1,
+                                    data->ipmi_resp_cpld,
+                                    sizeof(data->ipmi_resp_cpld));
+    }
+
     if (unlikely(status != 0))
         goto exit;
 
@@ -222,28 +229,24 @@ exit:
 static ssize_t show_cpld_version(struct device *dev, struct device_attribute *da, char *buf)
 {
     struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-    unsigned char major;
-    unsigned char minor;
-    unsigned char cpld_addr = 0;
+    unsigned char cpld_idx = 0;
     int error = 0;
 
     switch (attr->index) {
         case CPU_CPLD:
-            cpld_addr = IPMI_CPLD_COM_E_CMD;
+            cpld_idx = IPMI_CPLD_COM_E_IDX;
             break;
         case MB_FPGA:
-            cpld_addr = IPMI_CPLD_FPGA_CMD;
+            cpld_idx = IPMI_CPLD_FPGA_IDX;
             break;
-        case MB_CPLD0:
-            cpld_addr = IPMI_CPLD_MB_CPLD0_CMD;
-            break;
-        case MB_CPLD1:
-            cpld_addr = IPMI_CPLD_MB_CPLD1_CMD;
+        case MB_SYS:
+            cpld_idx = IPMI_CPLD_SYS_IDX;
             break;
         case FAN_CPLD1:
-            cpld_addr = IPMI_CPLD_1U_FAN_CMD;
+            cpld_idx = IPMI_CPLD_FCM0_FAN_IDX;
+            break;
         case FAN_CPLD2:
-            cpld_addr = IPMI_CPLD_2U_FAN_CMD;
+            cpld_idx = IPMI_CPLD_FCM1_FAN_IDX;
             break;
         default:
             return -EINVAL;
@@ -251,16 +254,17 @@ static ssize_t show_cpld_version(struct device *dev, struct device_attribute *da
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_sys_update_cpld_ver(cpld_addr);
+    data = as1813_128o_sys_update_cpld_ver(cpld_idx);
     if (!data->valid) {
         error = -EIO;
         goto exit;
     }
 
-    major = data->ipmi_resp_cpld[0];
-    minor = data->ipmi_resp_cpld[1];
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%d.%d\n", major, minor);
+    if(attr->index == CPU_CPLD)
+        return sprintf(buf, "%d.%d.%d.%d\n", data->ipmi_res_com_e_cpld[0], data->ipmi_res_com_e_cpld[1], data->ipmi_res_com_e_cpld[2], data->ipmi_res_com_e_cpld[3]);
+    else
+        return sprintf(buf, "%d.%d\n", data->ipmi_resp_cpld[0], data->ipmi_resp_cpld[1]);
 
 exit:
     mutex_unlock(&data->update_lock);
