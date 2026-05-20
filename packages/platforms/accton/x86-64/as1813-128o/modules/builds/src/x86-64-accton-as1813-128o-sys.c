@@ -31,7 +31,7 @@
 #include <linux/ipmi_smi.h>
 #include <linux/platform_device.h>
 #include <linux/string_helpers.h>
-#include "as1813-128o-ipmi.h"
+#include "accton_ipmi_intf.h"
 
 #define DRVNAME "as1813_128o_sys"
 

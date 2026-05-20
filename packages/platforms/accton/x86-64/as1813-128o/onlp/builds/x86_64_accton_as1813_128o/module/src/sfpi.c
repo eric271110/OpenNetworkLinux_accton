@@ -175,7 +175,7 @@ onlp_sfpi_dom_read(int port, uint8_t data[256])
     FILE* fp;
     char file[64] = {0};
 
-    sprintf(file, MODULE_EEPROM_FORMAT, PORT_BUS_INDEX(port));
+    snprintf(file, sizeof(file), MODULE_EEPROM_FORMAT, PORT_BUS_INDEX(port));
     fp = fopen(file, "r");
     if(fp == NULL) {
         AIM_LOG_ERROR("Unable to open the eeprom device file of port(%d)", port);

@@ -31,7 +31,7 @@
 #include <linux/ipmi_smi.h>
 #include <linux/platform_device.h>
 #include <linux/string_helpers.h>
-#include "as1813-128o-ipmi.h"
+#include "accton_ipmi_intf.h"
 
 #define DRVNAME "as1813_128o_psu"
 #define IPMI_PSU_READ_CMD 0x16
@@ -921,8 +921,8 @@ static int as1813_128o_psu_probe(struct platform_device *pdev)
     int status = 0;
     struct device *hwmon_dev = NULL;
 
-    hwmon_dev = hwmon_device_register_with_info(&pdev->dev, DRVNAME, 
-                    NULL, NULL, as1813_128o_psu_groups[pdev->id]);
+    hwmon_dev = hwmon_device_register_with_groups(&pdev->dev, DRVNAME,
+                    NULL, as1813_128o_psu_groups[pdev->id]);
     if (IS_ERR(hwmon_dev)) {
         status = PTR_ERR(hwmon_dev);
         return status;
@@ -972,12 +972,12 @@ static int __init as1813_128o_psu_init(void)
             ret = PTR_ERR(data->pdev[i]);
             goto dev_reg_err;
         }
-
-        /* Set up IPMI interface */
-        ret = init_ipmi_data(&data->ipmi, 0, &data->pdev[i]->dev);
-        if (ret)
-            goto ipmi_err;
     }
+
+    /* Set up IPMI interface (only once, shared across all PSUs) */
+    ret = init_ipmi_data(&data->ipmi, 0, &data->pdev[0]->dev);
+    if (ret)
+        goto ipmi_err;
 
     return 0;
 

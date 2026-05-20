@@ -25,6 +25,7 @@
  ***********************************************************/
 #include <onlplib/file.h>
 #include <onlp/platformi/thermali.h>
+#include <string.h>
 #include "platform_lib.h"
 
 #define VALIDATE(_id)                           \
@@ -33,6 +34,32 @@
             return ONLP_STATUS_E_INVALID;       \
         }                                       \
     } while(0)
+
+#define MAX_HWMON_IDX 20
+
+static int
+get_k10temp_temp(int *mcelsius)
+{
+    int i;
+
+    for (i = 0; i <= MAX_HWMON_IDX; i++) {
+        char *str = NULL;
+        int len = onlp_file_read_str(&str,
+            "/sys/class/hwmon/hwmon%d/name", i);
+
+        if (!str || len <= 0)
+            continue;
+
+        if (strncmp(str, "k10temp", 7) == 0) {
+            aim_free(str);
+            return onlp_file_read_int(mcelsius,
+                "/sys/class/hwmon/hwmon%d/temp1_input", i);
+        }
+        aim_free(str);
+    }
+
+    return ONLP_STATUS_E_MISSING;
+}
 
 static char* devfiles__[] = { /* must map with onlp_thermal_id */
     NULL,
@@ -64,11 +91,6 @@ static char* devfiles__[] = { /* must map with onlp_thermal_id */
     "/sys/devices/platform/as1813_128o_psu.3*psu4_temp1_input",
     "/sys/devices/platform/as1813_128o_psu.3*psu4_temp2_input",
     "/sys/devices/platform/as1813_128o_psu.3*psu4_temp3_input"
-};
-
-static char* cpu_coretemp_files[] = {
-    "/sys/bus/pci/drivers/k10temp/*/hwmon/hwmon*/temp1_input",
-    NULL,
 };
 
 /* Static values */
@@ -217,7 +239,7 @@ onlp_thermali_info_get(onlp_oid_t id, onlp_thermal_info_t* info)
     *info = tinfo[tid];
 
     if (tid == THERMAL_CPU_CORE) {
-        return onlp_file_read_int_max(&info->mcelsius, cpu_coretemp_files);
+        return get_k10temp_temp(&info->mcelsius);
     }
 
     return onlp_file_read_int(&info->mcelsius, devfiles__[tid]);

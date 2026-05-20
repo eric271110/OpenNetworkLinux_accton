@@ -31,7 +31,7 @@
 #include <linux/ipmi_smi.h>
 #include <linux/platform_device.h>
 #include <linux/string_helpers.h>
-#include "as1813-128o-ipmi.h"
+#include "accton_ipmi_intf.h"
 
 #define DRVNAME "as1813_128o_led"
 #define IPMI_LED_READ_CMD 0x1A
@@ -49,7 +49,7 @@ struct as1813_128o_led_data {
     struct mutex update_lock;
     char valid;           /* != 0 if registers are valid */
     unsigned long last_updated;    /* In jiffies */
-    unsigned char ipmi_resp[5]; /* 0:Loc 1:Diag 2:Gnss 3:Fan 4:Psu */
+    unsigned char ipmi_resp[5]; /* 0:Loc 1:Alarm 2:Diag 3:Fan 4:Psu */
     struct ipmi_data ipmi;
 };
 
@@ -103,18 +103,18 @@ enum led_light_mode {
 
 enum as1813_128o_led_sysfs_attrs {
     LED_LOC,
-    LED_DIAG,
     LED_ALARM,
+    LED_DIAG,
     LED_FAN,
     LED_PSU
 };
 
 static SENSOR_DEVICE_ATTR(led_loc, S_IWUSR | S_IRUGO, show_led, set_led,
                             LED_LOC);
-static SENSOR_DEVICE_ATTR(led_diag, S_IWUSR | S_IRUGO, show_led, set_led,
-                            LED_DIAG);
 static SENSOR_DEVICE_ATTR(led_alarm, S_IWUSR | S_IRUGO, show_led, set_led,
                             LED_ALARM);
+static SENSOR_DEVICE_ATTR(led_diag, S_IWUSR | S_IRUGO, show_led, set_led,
+                            LED_DIAG);
 static SENSOR_DEVICE_ATTR(led_fan, S_IWUSR | S_IRUGO, show_led, set_led,
                             LED_FAN);
 static SENSOR_DEVICE_ATTR(led_psu, S_IWUSR | S_IRUGO, show_led, set_led,
@@ -122,8 +122,8 @@ static SENSOR_DEVICE_ATTR(led_psu, S_IWUSR | S_IRUGO, show_led, set_led,
 
 static struct attribute *as1813_128o_led_attributes[] = {
     &sensor_dev_attr_led_loc.dev_attr.attr,
-    &sensor_dev_attr_led_diag.dev_attr.attr,
     &sensor_dev_attr_led_alarm.dev_attr.attr,
+    &sensor_dev_attr_led_diag.dev_attr.attr,
     &sensor_dev_attr_led_fan.dev_attr.attr,
     &sensor_dev_attr_led_psu.dev_attr.attr,
     NULL

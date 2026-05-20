@@ -85,7 +85,7 @@ class OnlPlatform_x86_64_accton_as1813_128o_r0(OnlPlatformAccton,
         self.modprobe('k10temp')
 
         #for m in [ 'i2c-ocores', 'fpga', 'fan', 'psu', 'thermal', 'sys', 'leds' ]:
-        for m in [ 'i2c-ocores', 'fpga' ]:
+        for m in [ 'i2c-ocores', 'fpga', 'thermal', 'sys' ]:
             self.insmod("x86-64-accton-as1813-128o-%s" % m)
 
         ########### initialize I2C bus 0 ###########
@@ -107,7 +107,7 @@ class OnlPlatform_x86_64_accton_as1813_128o_r0(OnlPlatformAccton,
         ]
 
         for port in range(1, len(sfp_bus)+1):
-            self.new_i2c_device('optoe3' if (port <= 129) else 'optoe2', 0x50, sfp_bus[port-1])
+            self.new_i2c_device('optoe3' if (port <= 128) else 'optoe2', 0x50, sfp_bus[port-1])
             subprocess.call('echo port%d > /sys/bus/i2c/devices/%d-0050/port_name' % (port, sfp_bus[port-1]), shell=True)
 
         return True

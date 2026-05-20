@@ -32,7 +32,7 @@
 #include <linux/ipmi_smi.h>
 #include <linux/platform_device.h>
 #include <linux/string_helpers.h>
-#include "as1813-128o-ipmi.h"
+#include "accton_ipmi_intf.h"
 
 #define DRVNAME "as1813_128o_thermal"
 #define IPMI_THERMAL_READ_CMD 0x12
@@ -185,10 +185,10 @@ static int as1813_128o_thermal_probe(struct platform_device *pdev)
     int status = 0;
     struct device *hwmon_dev;
 
-    hwmon_dev = hwmon_device_register_with_info(&pdev->dev, DRVNAME, 
-                    NULL, NULL, as1813_128o_thermal_groups);
-    if (IS_ERR(data->hwmon_dev)) {
-        status = PTR_ERR(data->hwmon_dev);
+    hwmon_dev = hwmon_device_register_with_groups(&pdev->dev, DRVNAME,
+                    NULL, as1813_128o_thermal_groups);
+    if (IS_ERR(hwmon_dev)) {
+        status = PTR_ERR(hwmon_dev);
         return status;
     }
 

@@ -44,7 +44,7 @@
 #define FAN_SYSFS_FORMAT   "/sys/devices/platform/as1813_128o_fan*"
 #define FAN_SYSFS_FORMAT_1 "/sys/devices/platform/as1813_128o_fan/hwmon/hwmon%d/%s"
 #define SYS_LED_PATH   "/sys/devices/platform/as1813_128o_led/"
-#define IDPROM_PATH "/sys/bus/i2c/devices/as1813_128o_sys/eeprom"
+#define IDPROM_PATH "/sys/devices/platform/as1813_128o_sys/eeprom"
 
 enum onlp_thermal_id {
     THERMAL_RESERVED = 0,

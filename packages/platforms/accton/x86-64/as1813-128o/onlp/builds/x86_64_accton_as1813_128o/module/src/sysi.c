@@ -35,13 +35,14 @@
 #include "x86_64_accton_as1813_128o_int.h"
 #include "x86_64_accton_as1813_128o_log.h"
 
-#define NUM_OF_CPLD_VER 4
+#define NUM_OF_CPLD_VER 5
 
 static char* cpld_ver_path[NUM_OF_CPLD_VER] = {
-    "/sys/devices/platform/as1813_128o_sys/fpga_version",   /* FPGA */
-    "/sys/devices/platform/as1813_128o_fpga/cpld1_version", /* CPLD-1 */
-    "/sys/devices/platform/as1813_128o_fpga/cpld2_version", /* CPLD-2 */
-    "/sys/devices/platform/as1813_128o_fan/hwmon/hwmon*/version" /* Fan CPLD */
+    "/sys/devices/platform/as1813_128o_sys/cpu_cpld_ver",   /* CPU CPLD ver */
+    "/sys/devices/platform/as1813_128o_sys/fpga_ver", /* FPGA ver */
+    "/sys/devices/platform/as1813_128o_sys/sys_ver", /* SYS CPLD ver */
+    "/sys/devices/platform/as1813_128o_sys/fan_cpld1_ver", /* Fan1 CPLD */
+    "/sys/devices/platform/as1813_128o_sys/fan_cpld2_ver" /* Fan2 CPLD */
 };
 
 const char*
@@ -99,19 +100,7 @@ onlp_sysi_platform_info_get(onlp_platform_info_t* pi)
     char *v[NUM_OF_CPLD_VER] = {NULL};
 
     for (i = 0; i < AIM_ARRAYSIZE(cpld_ver_path); i++) {
-        if (i == 3) {
-            int hwmon_idx = onlp_get_fan_hwmon_idx();
-
-            if (hwmon_idx < 0) {
-                ret = ONLP_STATUS_E_INTERNAL;
-                break;
-            }
-
-            len = onlp_file_read_str(&v[i], FAN_SYSFS_FORMAT_1, hwmon_idx, "version");
-        }
-        else {
-            len = onlp_file_read_str(&v[i], cpld_ver_path[i]);
-        }
+        len = onlp_file_read_str(&v[i], cpld_ver_path[i]);
 
         if (v[i] == NULL || len <= 0) {
             ret = ONLP_STATUS_E_INTERNAL;
@@ -120,9 +109,12 @@ onlp_sysi_platform_info_get(onlp_platform_info_t* pi)
     }
 
     if (ret == ONLP_STATUS_OK) {
-        pi->cpld_versions = aim_fstrdup("\r\nFPGA:%s\r\nCPLD-1:%s"
-                                        "\r\nCPLD-2:%s\r\nFan CPLD:%s",
-                                        v[0], v[1], v[2], v[3]);
+        pi->cpld_versions = aim_fstrdup("\r\n\t   CPU CPLD:%s"
+                                        "\r\n\t   FPGA:%s"
+                                        "\r\n\t   SYS CPLD:%s"
+                                        "\r\n\t   Fan1 CPLD:%s"
+                                        "\r\n\t   FAN2 CPLD:%s",
+                                        v[0], v[1], v[2], v[3], v[4]);
     }
 
     for (i = 0; i < AIM_ARRAYSIZE(v); i++) {

@@ -127,7 +127,12 @@ _onlp_fani_set_fan_dir_info(int fid, onlp_fan_info_t* info)
 static int
 _onlp_fani_info_get_fan(int fid, onlp_fan_info_t* info)
 {
-    int value, ret;
+    int value, ret, hwmon_idx;
+    int len, copy_len;
+    char *str = NULL;
+    char file[32];
+
+    hwmon_idx = onlp_get_fan_hwmon_idx();
 
     /* get fan present status
      */
@@ -141,9 +146,9 @@ _onlp_fani_info_get_fan(int fid, onlp_fan_info_t* info)
     }
     info->status |= ONLP_FAN_STATUS_PRESENT;
 
-    /* get fan fault status (turn on when any one fails)
+    /* get fan fault status
      */
-    ret = onlp_file_read_int(&value, "%s""fan%d_fault", FAN_SYSFS_FORMAT, fid);
+    ret = onlp_file_read_int(&value, FAN_SYSFS_FORMAT"fan%d_fault", fid);
     if (ret < 0) {
         return ONLP_STATUS_E_INTERNAL;
     }
@@ -155,7 +160,7 @@ _onlp_fani_info_get_fan(int fid, onlp_fan_info_t* info)
 
     /* get fan speed
      */
-    ret = onlp_file_read_int(&value, "%s""fan%d_input", FAN_SYSFS_FORMAT, fid);
+    ret = onlp_file_read_int(&value, FAN_SYSFS_FORMAT"fan%d_input", fid);
     if (ret < 0) {
         return ONLP_STATUS_E_INTERNAL;
     }
@@ -163,14 +168,35 @@ _onlp_fani_info_get_fan(int fid, onlp_fan_info_t* info)
 
     /* get speed percentage from rpm
      */
-
-    if(fid <= FAN_8_ON_FAN_BOARD)
-        info->percentage = (info->rpm*100)/MAX_FAN_FRONT_SPEED;
+    if (fid <= FAN_8_ON_FAN_BOARD)
+        info->percentage = (info->rpm * 100) / MAX_FAN_FRONT_SPEED;
     else
-        info->percentage = (info->rpm*100)/MAX_FAN_REAR_SPEED;
+        info->percentage = (info->rpm * 100) / MAX_FAN_REAR_SPEED;
 
     if (info->percentage > 100)
         info->percentage = 100;
+
+    /* Read model name */
+    if (hwmon_idx >= 0) {
+        snprintf(file, sizeof(file), "fan%d_model", fid);
+        len = onlp_file_read_str(&str, FAN_SYSFS_FORMAT_1, hwmon_idx, file);
+        if (str && len > 0) {
+            copy_len = (sizeof(info->model) - 1 > len) ? len : sizeof(info->model) - 1;
+            memcpy(info->model, str, copy_len);
+            info->model[copy_len] = '\0';
+        }
+        AIM_FREE_IF_PTR(str);
+
+        /* Read serial number */
+        snprintf(file, sizeof(file), "fan%d_serial", fid);
+        len = onlp_file_read_str(&str, FAN_SYSFS_FORMAT_1, hwmon_idx, file);
+        if (str && len > 0) {
+            copy_len = (sizeof(info->serial) - 1 > len) ? len : sizeof(info->serial) - 1;
+            memcpy(info->serial, str, copy_len);
+            info->serial[copy_len] = '\0';
+        }
+        AIM_FREE_IF_PTR(str);
+    }
 
     _onlp_fani_set_fan_dir_info(fid, info);
 

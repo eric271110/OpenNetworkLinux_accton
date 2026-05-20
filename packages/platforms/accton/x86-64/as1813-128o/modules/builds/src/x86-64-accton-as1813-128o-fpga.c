@@ -1220,6 +1220,8 @@ static struct attribute_mapping attribute_mappings[] = {
     [MODULE_LPMODE_125]  = {CPLD_PCIE_START_OFFSET + 0x73, SPI_MUX_MB_CPLD1, 0x01 << 6, 1}, //LPMODE port125
     [MODULE_LPMODE_126]  = {CPLD_PCIE_START_OFFSET + 0x73, SPI_MUX_MB_CPLD1, 0x01 << 7, 1}, //LPMODE port126
 
+    [MODULE_PRESENT_129]    = {CPLD_PCIE_START_OFFSET + 0x28, SPI_MUX_MB_CPLD1, 0x01 << 0, 1}, //PRESENT port129
+    [MODULE_PRESENT_130]    = {CPLD_PCIE_START_OFFSET + 0x28, SPI_MUX_MB_CPLD1, 0x01 << 1, 1}, //PRESENT port130
     [MODULE_TX_DISABLE_129] = {CPLD_PCIE_START_OFFSET + 0x18, SPI_MUX_MB_CPLD1, 0x01 << 0, 1}, //TX_DISABLE port129
     [MODULE_TX_DISABLE_130] = {CPLD_PCIE_START_OFFSET + 0x18, SPI_MUX_MB_CPLD1, 0x01 << 1, 1}, //TX_DISABLE port130
     [MODULE_TX_FAULT_129]   = {CPLD_PCIE_START_OFFSET + 0x10, SPI_MUX_MB_CPLD1, 0x01 << 0, 1}, //TX_FAULT port129
@@ -1665,7 +1667,6 @@ exit_ocores_device:
         i--;
         platform_device_unregister(fpga_ctl->pci_fpga_dev.fpga_i2c[i]);
     }
-exit_pci_iounmap0:
     spi_busy_reg = NULL;
     pci_iounmap(fpga_ctl->pci_fpga_dev.pci_dev, fpga_ctl->pci_fpga_dev.data_base_addr0);
 exit_pci_disable:

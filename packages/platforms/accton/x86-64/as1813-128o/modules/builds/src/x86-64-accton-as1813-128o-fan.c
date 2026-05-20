@@ -33,19 +33,25 @@
 #include <linux/ipmi_smi.h>
 #include <linux/platform_device.h>
 #include <linux/string_helpers.h>
-#include "as1813-128o-ipmi.h"
+#include "accton_ipmi_intf.h"
 
 #define DRVNAME "as1813_128o_fan"
 #define IPMI_FAN_READ_CMD 0x14
 #define IPMI_FAN_WRITE_CMD 0x15
+#define IPMI_FAN_READ_MODEL_CMD 0x10
+#define IPMI_FAN_READ_SERIAL_CMD 0x11
 #define IPMI_FAN_READ_RPM_CMD 0x20
 #define IPMI_FAN_REG_READ_CMD 0x20
 #define IPMI_FAN_REG_WRITE_CMD 0x21
 #define MAX_FAN_SPEED_RPM 33000
+#define IPMI_FAN_MODEL_SIZE 14
+#define IPMI_FAN_SERIAL_SIZE 13
 
 static ssize_t set_fan(struct device *dev, struct device_attribute *da,
             const char *buf, size_t count);
 static ssize_t show_fan(struct device *dev, struct device_attribute *attr,
+            char *buf);
+static ssize_t show_string(struct device *dev, struct device_attribute *attr,
             char *buf);
 static ssize_t show_version(struct device *dev, struct device_attribute *da,
             char *buf);
@@ -100,6 +106,7 @@ struct as1813_128o_fan_data {
     unsigned char ipmi_resp[NUM_OF_FAN * FAN_DATA_COUNT + 2];
     unsigned char ipmi_resp_cpld[2];
     unsigned char ipmi_resp_speed[NUM_OF_FAN * FAN_SPEED_DATA_COUNT];
+    unsigned char ipmi_resp_string[16];
     struct ipmi_data ipmi;
     unsigned char ipmi_tx_data[3];  /* 0: FAN id, 1: 0x02, 2: PWM */
 };
@@ -122,13 +129,17 @@ static struct platform_driver as1813_128o_fan_driver = {
 #define FAN_FAULT_ATTR_ID(index) FAN##index##_FAULT
 #define FAN_RPM_TARGET_ATTR_ID(index) FAN##index##_TARGET
 #define FAN_RPM_TOLERANCE_ATTR_ID(index) FAN##index##_TOLERANCE
+#define FAN_MODEL_ATTR_ID(index) FAN##index##_MODEL
+#define FAN_SERIAL_ATTR_ID(index) FAN##index##_SERIAL
 
 #define FAN_ATTR(fan_id) \
     FAN_PRESENT_ATTR_ID(fan_id), \
     FAN_PWM_ATTR_ID(fan_id), \
     FAN_RPM_ATTR_ID(fan_id), \
     FAN_DIR_ATTR_ID(fan_id), \
-    FAN_FAULT_ATTR_ID(fan_id)
+    FAN_FAULT_ATTR_ID(fan_id), \
+    FAN_MODEL_ATTR_ID(fan_id), \
+    FAN_SERIAL_ATTR_ID(fan_id)
 
 #define FAN_RPM_THRESHOLD_ATTR(fan_id) \
     FAN_RPM_TARGET_ATTR_ID(fan_id), \
@@ -192,7 +203,11 @@ enum as1813_128o_fan_sysfs_attrs {
     static SENSOR_DEVICE_ATTR(fan##index##_target, S_IRUGO, show_threshold, \
                                 NULL, FAN##index##_TARGET); \
     static SENSOR_DEVICE_ATTR(fan##index##_tolerance, S_IRUGO, show_threshold,\
-                                NULL, FAN##index##_TOLERANCE)
+                                NULL, FAN##index##_TOLERANCE); \
+    static SENSOR_DEVICE_ATTR(fan##index##_model, S_IRUGO, show_string,\
+                                NULL, FAN##index##_MODEL); \
+    static SENSOR_DEVICE_ATTR(fan##index##_serial, S_IRUGO, show_string,\
+                                NULL, FAN##index##_SERIAL)
 
 #define DECLARE_FAN_ATTR(index) \
     &sensor_dev_attr_fan##index##_present.dev_attr.attr, \
@@ -201,7 +216,9 @@ enum as1813_128o_fan_sysfs_attrs {
     &sensor_dev_attr_fan##index##_dir.dev_attr.attr, \
     &sensor_dev_attr_fan##index##_fault.dev_attr.attr, \
     &sensor_dev_attr_fan##index##_target.dev_attr.attr, \
-    &sensor_dev_attr_fan##index##_tolerance.dev_attr.attr
+    &sensor_dev_attr_fan##index##_tolerance.dev_attr.attr, \
+    &sensor_dev_attr_fan##index##_model.dev_attr.attr, \
+    &sensor_dev_attr_fan##index##_serial.dev_attr.attr
 
 DECLARE_FAN_SENSOR_DEVICE_ATTR(1);
 DECLARE_FAN_SENSOR_DEVICE_ATTR(2);
@@ -461,6 +478,121 @@ exit:
     return data;
 }
 
+static struct as1813_128o_fan_data *as1813_128o_fan_update_model_serial(int fan_id, int index)
+{
+    int status = 0;
+    int string_size = 0 ;
+
+    data->valid = 0;
+
+    switch (index) {
+    case FAN1_MODEL:
+    case FAN2_MODEL:
+    case FAN3_MODEL:
+    case FAN4_MODEL:
+    case FAN5_MODEL:
+    case FAN6_MODEL:
+    case FAN7_MODEL:
+    case FAN8_MODEL:
+    case FAN9_MODEL:
+    case FAN10_MODEL:
+    case FAN11_MODEL:
+    case FAN12_MODEL:
+    case FAN13_MODEL:
+    case FAN14_MODEL:
+    case FAN15_MODEL:
+    case FAN16_MODEL:
+        data->ipmi_tx_data[0] = IPMI_FAN_READ_MODEL_CMD;
+        string_size = IPMI_FAN_MODEL_SIZE;
+        data->ipmi_resp_string[IPMI_FAN_MODEL_SIZE] = '\0';
+        break;
+    case FAN1_SERIAL:
+    case FAN2_SERIAL:
+    case FAN3_SERIAL:
+    case FAN4_SERIAL:
+    case FAN5_SERIAL:
+    case FAN6_SERIAL:
+    case FAN7_SERIAL:
+    case FAN8_SERIAL:
+    case FAN9_SERIAL:
+    case FAN10_SERIAL:
+    case FAN11_SERIAL:
+    case FAN12_SERIAL:
+    case FAN13_SERIAL:
+    case FAN14_SERIAL:
+    case FAN15_SERIAL:
+    case FAN16_SERIAL:
+        data->ipmi_tx_data[0] = IPMI_FAN_READ_SERIAL_CMD;
+        string_size = IPMI_FAN_SERIAL_SIZE;
+        data->ipmi_resp_string[IPMI_FAN_SERIAL_SIZE] = '\0';
+        break;
+    default:
+        goto exit;
+    }
+
+    if (fan_id > 7)
+        data->ipmi_tx_data[1] = fan_id - 8;
+    else
+        data->ipmi_tx_data[1] = fan_id;
+    status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_FAN_READ_CMD,
+                                data->ipmi_tx_data, 2,
+                                data->ipmi_resp_string,
+                                string_size);
+    if (unlikely(status != 0))
+        goto exit;
+
+    if (unlikely(data->ipmi.rx_result != 0)) {
+        status = -EIO;
+        goto exit;
+    }
+
+    data->last_updated = jiffies;
+    data->valid = 1;
+
+
+exit:
+    return data;
+}
+
+static ssize_t show_string(struct device *dev, struct device_attribute *da,
+                            char *buf)
+{
+    struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
+    unsigned char fid = attr->index / NUM_OF_PER_FAN_ATTR;
+    int present = 0;
+    int error = 0;
+    int index = 0;
+    char *str = NULL;
+
+    mutex_lock(&data->update_lock);
+    /* check fan present */
+    data = as1813_128o_fan_update_device();
+    if (!data->valid) {
+        error = -EIO;
+        goto exit;
+    }
+
+    index = fid * FAN_DATA_COUNT; /* base index */
+    present = !!data->ipmi_resp[index + FAN_PRESENT];
+    mutex_unlock(&data->update_lock);
+    if (!present)
+        return sprintf(buf, "\n");
+
+    mutex_lock(&data->update_lock);
+    data = as1813_128o_fan_update_model_serial(fid, attr->index);
+    if (!data->valid) {
+        error = -EIO;
+        goto exit;
+    }
+    mutex_unlock(&data->update_lock);
+
+    str = data->ipmi_resp_string;
+    return sprintf(buf, "%s\n", str);
+    exit:
+        mutex_unlock(&data->update_lock);
+        return error;
+}
+
 static ssize_t show_version(struct device *dev, struct device_attribute *da,
                                 char *buf)
 {
@@ -593,10 +725,10 @@ static int as1813_128o_fan_probe(struct platform_device *pdev)
     int status = 0;
     struct device *hwmon_dev;
 
-    hwmon_dev = hwmon_device_register_with_info(&pdev->dev, DRVNAME,
-                    NULL, NULL, as1813_128o_fan_groups);
-    if (IS_ERR(data->hwmon_dev)) {
-        status = PTR_ERR(data->hwmon_dev);
+    hwmon_dev = hwmon_device_register_with_groups(&pdev->dev, DRVNAME,
+                    NULL, as1813_128o_fan_groups);
+    if (IS_ERR(hwmon_dev)) {
+        status = PTR_ERR(hwmon_dev);
         return status;
     }
 
