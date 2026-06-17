@@ -275,20 +275,23 @@ static int as1813_128o_sys_probe(struct platform_device *pdev)
 {
     int status = -1;
 
-    /* Register sysfs hooks */
+    /* Register eeprom sysfs */
     status = sysfs_eeprom_init(&pdev->dev.kobj, &data->eeprom);
     if (status) {
         goto exit;
     }
+
     /* Register sysfs hooks */
     status = sysfs_create_group(&pdev->dev.kobj, &as1813_128o_sys_group);
     if (status)
-        goto exit;
+        goto exit_eeprom;
 
     dev_info(&pdev->dev, "device created\n");
 
     return 0;
 
+exit_eeprom:
+    sysfs_eeprom_cleanup(&pdev->dev.kobj, &data->eeprom);
 exit:
     return status;
 }

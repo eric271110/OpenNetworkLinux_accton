@@ -415,20 +415,19 @@ static ssize_t set_fan(struct device *dev, struct device_attribute *da,
     if (status)
         return status;
 
-    pwm = (pwm * 100) / 666; /* Convert pwm to register value */
+    /* Validate PWM percentage range (0~100) */
+    if (pwm < 0 || pwm > 100)
+        return -EINVAL;
 
     mutex_lock(&data->update_lock);
 
     /*
      * Send IPMI write command :
-     * BMC supports a design with four fan modules, each containing two fans.
-     * Since NUM_OF_FAN_MODULE is 8 in AS1813, it needs to be divided by 2.
-     * The result :
-     * fan1_pwm(Front) : ipmi_tx_data[0] = 1, fan2_pwm(Front) : ipmi_tx_data[0] = 2
-     * fan3_pwm(Front) : ipmi_tx_data[0] = 3, fan4_pwm(Front) : ipmi_tx_data[0] = 4
-     * fan5_pwm(Rear) : ipmi_tx_data[0] = 1, fan6_pwm(Rear) : ipmi_tx_data[0] = 2
-     * fan7_pwm(Rear) : ipmi_tx_data[0] = 3, fan8_pwm(Rear) : ipmi_tx_data[0] = 4
-     *
+     * BMC supports a design with 8 fan modules, each containing
+     * a front fan and a rear fan (16 fans total).
+     * NUM_OF_FAN_MODULE is 16 and divided by 2 gives 8 fan modules.
+     * The result maps fan IDs 0~7 (front) and 8~15 (rear) to
+     * module IDs 1~8 for the IPMI command.
      */
     data->ipmi_tx_data[0] = (fid % (NUM_OF_FAN_MODULE / 2)) + 1;
     data->ipmi_tx_data[1] = 0x02;
@@ -562,9 +561,9 @@ static ssize_t show_string(struct device *dev, struct device_attribute *da,
     int present = 0;
     int error = 0;
     int index = 0;
-    char *str = NULL;
 
     mutex_lock(&data->update_lock);
+
     /* check fan present */
     data = as1813_128o_fan_update_device();
     if (!data->valid) {
@@ -574,23 +573,25 @@ static ssize_t show_string(struct device *dev, struct device_attribute *da,
 
     index = fid * FAN_DATA_COUNT; /* base index */
     present = !!data->ipmi_resp[index + FAN_PRESENT];
-    mutex_unlock(&data->update_lock);
-    if (!present)
+    if (!present) {
+        mutex_unlock(&data->update_lock);
         return sprintf(buf, "\n");
+    }
 
-    mutex_lock(&data->update_lock);
     data = as1813_128o_fan_update_model_serial(fid, attr->index);
     if (!data->valid) {
         error = -EIO;
         goto exit;
     }
-    mutex_unlock(&data->update_lock);
 
-    str = data->ipmi_resp_string;
-    return sprintf(buf, "%s\n", str);
-    exit:
-        mutex_unlock(&data->update_lock);
-        return error;
+    /* Copy string while still holding the lock */
+    error = sprintf(buf, "%s\n", data->ipmi_resp_string);
+    mutex_unlock(&data->update_lock);
+    return error;
+
+exit:
+    mutex_unlock(&data->update_lock);
+    return error;
 }
 
 static ssize_t show_version(struct device *dev, struct device_attribute *da,

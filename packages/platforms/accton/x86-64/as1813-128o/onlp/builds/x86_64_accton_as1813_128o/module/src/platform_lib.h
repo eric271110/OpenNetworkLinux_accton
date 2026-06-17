@@ -29,7 +29,7 @@
 #include "x86_64_accton_as1813_128o_log.h"
 
 #define CHASSIS_FAN_COUNT      16
-#define CHASSIS_THERMAL_COUNT  16
+#define CHASSIS_THERMAL_COUNT  16  /* CPU Core + 15 mainboard sensors */
 #define CHASSIS_LED_COUNT      5
 #define CHASSIS_PSU_COUNT      4
 #define NUM_OF_THERMAL_PER_PSU 3

@@ -638,12 +638,11 @@ static int ocores_xfer_core(struct ocores_i2c *i2c,
     int ret = 0;
     u8 ctrl;
     int fpga_spi_mux_data;
-
-    LOCK(&cpld_access_lock);
-
     struct platform_device *pdev;
     struct device *dev;
     int port;
+
+    LOCK(&cpld_access_lock);
 
     if (!i2c->adap.dev.parent) {
         UNLOCK(&cpld_access_lock);
@@ -654,6 +653,12 @@ static int ocores_xfer_core(struct ocores_i2c *i2c,
     dev = i2c->adap.dev.parent;
     pdev = container_of(dev, struct platform_device, dev);
     port = (pdev->id & 0x00FF);
+
+    if (port >= PORT_NUM) {
+        UNLOCK(&cpld_access_lock);
+        return -EINVAL;
+    }
+
     fpga_spi_mux_data = port_mux[port];
     iowrite8(fpga_spi_mux_data, spi_mux_reg);
 

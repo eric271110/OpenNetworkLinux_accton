@@ -158,24 +158,26 @@ onlp_psui_info_get(onlp_oid_t id, onlp_psu_info_t* info)
     hwmon_idx = onlp_get_psu_hwmon_idx(pid);
     if (hwmon_idx >= 0) {
         char *str = NULL;
-        int len;
+        int len, copy_len;
         char file[32];
 
         /* Read model */
         snprintf(file, sizeof(file), "psu%d_model", pid);
         len = onlp_file_read_str(&str, PSU_SYSFS_FORMAT_1, (pid-1), hwmon_idx, file);
-        if (str && len) {
-            memcpy(info->model, str, len);
-            info->model[len] = '\0';
+        if (str && len > 0) {
+            copy_len = (sizeof(info->model) - 1 > len) ? len : sizeof(info->model) - 1;
+            memcpy(info->model, str, copy_len);
+            info->model[copy_len] = '\0';
         }
         AIM_FREE_IF_PTR(str);
 
         /* Read serial */
         snprintf(file, sizeof(file), "psu%d_serial", pid);
         len = onlp_file_read_str(&str, PSU_SYSFS_FORMAT_1, (pid-1), hwmon_idx, file);
-        if (str && len) {
-            memcpy(info->serial, str, len);
-            info->serial[len] = '\0';
+        if (str && len > 0) {
+            copy_len = (sizeof(info->serial) - 1 > len) ? len : sizeof(info->serial) - 1;
+            memcpy(info->serial, str, copy_len);
+            info->serial[copy_len] = '\0';
         }
         AIM_FREE_IF_PTR(str);
     }

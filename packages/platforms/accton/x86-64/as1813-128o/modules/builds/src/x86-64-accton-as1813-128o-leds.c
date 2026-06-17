@@ -50,6 +50,7 @@ struct as1813_128o_led_data {
     char valid;           /* != 0 if registers are valid */
     unsigned long last_updated;    /* In jiffies */
     unsigned char ipmi_resp[5]; /* 0:Loc 1:Alarm 2:Diag 3:Fan 4:Psu */
+    unsigned char ipmi_tx_data[2]; /* TX buffer for write commands */
     struct ipmi_data ipmi;
 };
 
@@ -241,41 +242,41 @@ static ssize_t set_led(struct device *dev, struct device_attribute *da,
         goto exit;
     }
 
-    data->ipmi_resp[0] = attr->index + 1;
+    data->ipmi_tx_data[0] = attr->index + 1;
 
     switch (mode) {
     case LED_MODE_OFF:
-        data->ipmi_resp[1] = IPMI_LED_MODE_OFF;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_OFF;
         break;
     case LED_MODE_RED:
-        data->ipmi_resp[1] = IPMI_LED_MODE_RED;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_RED;
         break;
     case LED_MODE_RED_BLINKING:
-        data->ipmi_resp[1] = IPMI_LED_MODE_RED_BLINKING;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_RED_BLINKING;
         break;
     case LED_MODE_GREEN:
-        data->ipmi_resp[1] = IPMI_LED_MODE_GREEN;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_GREEN;
         break;
     case LED_MODE_GREEN_BLINKING:
-        data->ipmi_resp[1] = IPMI_LED_MODE_GREEN_BLINKING;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_GREEN_BLINKING;
         break;
     case LED_MODE_BLUE:
-        data->ipmi_resp[1] = IPMI_LED_MODE_BLUE;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_BLUE;
         break;
     case LED_MODE_BLUE_BLINKING:
-        data->ipmi_resp[1] = IPMI_LED_MODE_BLUE_BLINKING;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_BLUE_BLINKING;
         break;
     case LED_MODE_CYAN:
-        data->ipmi_resp[1] = IPMI_LED_MODE_CYAN;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_CYAN;
         break;
     case LED_MODE_WHITE:
-        data->ipmi_resp[1] = IPMI_LED_MODE_WHITE;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_WHITE;
         break;
     case LED_MODE_YELLOW:
-        data->ipmi_resp[1] = IPMI_LED_MODE_AMBER;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_AMBER;
         break;
     case LED_MODE_ORANGE:
-        data->ipmi_resp[1] = IPMI_LED_MODE_ORANGE;
+        data->ipmi_tx_data[1] = IPMI_LED_MODE_ORANGE;
         break;
     default:
         status = -EINVAL;
@@ -284,7 +285,7 @@ static ssize_t set_led(struct device *dev, struct device_attribute *da,
 
     /* Send IPMI write command */
     status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_LED_WRITE_CMD,
-                                data->ipmi_resp, 2, NULL, 0);
+                                data->ipmi_tx_data, 2, NULL, 0);
     if (unlikely(status != 0))
         goto exit;
 
