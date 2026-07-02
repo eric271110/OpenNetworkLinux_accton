@@ -36,7 +36,7 @@ struct ipmi_data {
 
 static void ipmi_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
 {
-    unsigned short rx_len;
+    unsigned short copy_len;
     struct ipmi_data *ipmi = user_msg_data;
 
     if (msg->msgid != ipmi->tx_msgid) {
@@ -51,10 +51,14 @@ static void ipmi_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
         ipmi->rx_result = IPMI_UNKNOWN_ERR_COMPLETION_CODE;
 
     if (msg->msg.data_len > 1) {
-        rx_len = msg->msg.data_len - 1;
-        if (ipmi->rx_msg_len < rx_len)
-            rx_len = ipmi->rx_msg_len;
-        ipmi->rx_msg_len = rx_len;
+        /* Clamp copy size to caller's rx buffer; do not confuse with
+         * ipmi->rx_msg_len which carries the *capacity* on entry and the
+         * actual byte count on exit.
+         */
+        copy_len = msg->msg.data_len - 1;
+        if (ipmi->rx_msg_len < copy_len)
+            copy_len = ipmi->rx_msg_len;
+        ipmi->rx_msg_len = copy_len;
         memcpy(ipmi->rx_msg_data, msg->msg.data + 1, ipmi->rx_msg_len);
     } else {
         ipmi->rx_msg_len = 0;

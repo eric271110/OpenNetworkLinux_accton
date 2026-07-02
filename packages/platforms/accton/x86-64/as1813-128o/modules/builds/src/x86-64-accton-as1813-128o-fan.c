@@ -36,13 +36,34 @@
 #include "accton_ipmi_intf.h"
 
 #define DRVNAME "as1813_128o_fan"
-#define IPMI_FAN_READ_CMD 0x14
-#define IPMI_FAN_WRITE_CMD 0x15
-#define IPMI_FAN_READ_MODEL_CMD 0x10
-#define IPMI_FAN_READ_SERIAL_CMD 0x11
-#define IPMI_FAN_READ_RPM_CMD 0x20
-#define IPMI_FAN_REG_READ_CMD 0x20
-#define IPMI_FAN_REG_WRITE_CMD 0x21
+
+/*
+ * IPMI command IDs (BMC NetFn 0x34 unless noted):
+ *
+ * Top-level commands (sent as msg.cmd):
+ *   IPMI_FAN_READ_CMD          0x14  read fan status (present, PWM, RPM,
+ *                                     model, serial, RPM speed table)
+ *   IPMI_FAN_WRITE_CMD         0x15  set fan PWM per module
+ *   IPMI_FAN_CPLD_REG_READ_CMD 0x20  read fan CPLD version register
+ *   IPMI_FAN_CPLD_REG_WRITE_CMD 0x21 write fan CPLD register (unused today)
+ *
+ * Sub-commands (first byte of tx_data under IPMI_FAN_READ_CMD 0x14):
+ *   IPMI_FAN_SUBCMD_READ_MODEL  0x10  read model FRU
+ *   IPMI_FAN_SUBCMD_READ_SERIAL 0x11  read serial FRU
+ *   IPMI_FAN_SUBCMD_READ_RPM    0x20  read RPM/target/tolerance table
+ *
+ * Note: the RPM sub-command and the CPLD-reg top-level command happen to
+ * share the value 0x20 but sit in different message positions; keep them
+ * as separate macros so future edits do not confuse the two.
+ */
+#define IPMI_FAN_READ_CMD               0x14
+#define IPMI_FAN_WRITE_CMD              0x15
+#define IPMI_FAN_SUBCMD_READ_MODEL      0x10
+#define IPMI_FAN_SUBCMD_READ_SERIAL     0x11
+#define IPMI_FAN_SUBCMD_READ_RPM        0x20
+#define IPMI_FAN_CPLD_REG_READ_CMD      0x20
+#define IPMI_FAN_CPLD_REG_WRITE_CMD     0x21
+
 #define MAX_FAN_SPEED_RPM 33000
 #define IPMI_FAN_MODEL_SIZE 14
 #define IPMI_FAN_SERIAL_SIZE 13
@@ -80,8 +101,21 @@ enum fan_id {
     FAN_15,
     FAN_16,
     NUM_OF_FAN,
-    NUM_OF_FAN_MODULE = NUM_OF_FAN
 };
+
+/*
+ * 8 physical fan modules, each with a front + rear rotor (16 rotors total).
+ * NUM_OF_FAN_MODULES is the *module* count; do not conflate with NUM_OF_FAN.
+ */
+#define NUM_OF_FAN_MODULES      (NUM_OF_FAN / 2)
+
+/*
+ * IPMI fan-dir response packs the direction bit of each rotor into the trailing
+ * 2-byte word (NUM_OF_FAN bits, one per rotor). Use NUM_OF_FAN to mask the bit
+ * index when reading; renaming the bound makes the intent obvious vs.
+ * NUM_OF_FAN_MODULES which is half the size.
+ */
+#define FAN_DIR_BIT_RANGE       NUM_OF_FAN
 
 enum fan_data_index {
     FAN_PRESENT,
@@ -89,7 +123,9 @@ enum fan_data_index {
     FAN_SPEED0,
     FAN_SPEED1,
     FAN_DATA_COUNT,
+};
 
+enum fan_speed_data_index {
     FAN_TARGET_SPEED0 = 0,
     FAN_TARGET_SPEED1,
     FAN_SPEED_TOLERANCE,
@@ -279,11 +315,18 @@ static struct as1813_128o_fan_data *as1813_128o_fan_update_device(void)
         goto exit;
     }
 
-    data->ipmi_tx_data[0] = IPMI_FAN_READ_RPM_CMD;
+    data->ipmi_tx_data[0] = IPMI_FAN_SUBCMD_READ_RPM;
     status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_FAN_READ_CMD,
                                 data->ipmi_tx_data, 1,
                                 data->ipmi_resp_speed,
                                 sizeof(data->ipmi_resp_speed));
+    if (unlikely(status != 0))
+        goto exit;
+
+    if (unlikely(data->ipmi.rx_result != 0)) {
+        status = -EIO;
+        goto exit;
+    }
 
     data->last_updated = jiffies;
     data->valid = 1;
@@ -304,7 +347,7 @@ static ssize_t show_fan(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_fan_update_device();
+    as1813_128o_fan_update_device();
     if (!data->valid) {
         error = -EIO;
         goto exit;
@@ -348,7 +391,7 @@ static ssize_t show_fan(struct device *dev, struct device_attribute *da,
     case FAN14_PWM:
     case FAN15_PWM:
     case FAN16_PWM:
-        index = (fid % NUM_OF_FAN_MODULE) * FAN_DATA_COUNT;
+        index = (fid % NUM_OF_FAN) * FAN_DATA_COUNT;
         value = DIV_ROUND_CLOSEST(data->ipmi_resp[index + FAN_PWM] * 666, 100);
         break;
     case FAN1_INPUT:
@@ -396,7 +439,7 @@ static ssize_t show_fan(struct device *dev, struct device_attribute *da,
     }
 
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%d\n", value);
+    return scnprintf(buf, PAGE_SIZE, "%d\n", value);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -419,17 +462,25 @@ static ssize_t set_fan(struct device *dev, struct device_attribute *da,
     if (pwm < 0 || pwm > 100)
         return -EINVAL;
 
+    /*
+     * BMC PWM register is 0~15 raw. show_fan() converts back with
+     * DIV_ROUND_CLOSEST(reg * 666, 100), so use the exact inverse here
+     * to keep set/show symmetric (with 16 discrete steps the round-trip
+     * is quantized but consistent).
+     */
+    pwm = DIV_ROUND_CLOSEST(pwm * 100, 666);
+
     mutex_lock(&data->update_lock);
 
     /*
-     * Send IPMI write command :
-     * BMC supports a design with 8 fan modules, each containing
-     * a front fan and a rear fan (16 fans total).
-     * NUM_OF_FAN_MODULE is 16 and divided by 2 gives 8 fan modules.
-     * The result maps fan IDs 0~7 (front) and 8~15 (rear) to
-     * module IDs 1~8 for the IPMI command.
+     * Send IPMI write command.
+     *
+     * BMC layout: 8 fan modules, each containing a front fan (fid 0..7) and a
+     * rear fan (fid 8..15) that share a single PWM control register. The BMC
+     * accepts module IDs 1..8 (one per module), so collapse front/rear into
+     * the same module slot before sending.
      */
-    data->ipmi_tx_data[0] = (fid % (NUM_OF_FAN_MODULE / 2)) + 1;
+    data->ipmi_tx_data[0] = (fid % NUM_OF_FAN_MODULES) + 1;
     data->ipmi_tx_data[1] = 0x02;
     data->ipmi_tx_data[2] = pwm;
     status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_FAN_WRITE_CMD,
@@ -458,7 +509,7 @@ static struct as1813_128o_fan_data *as1813_128o_fan_update_cpld_ver(void)
 
     data->valid = 0;
     data->ipmi_tx_data[0] = 0x33;
-    status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_FAN_REG_READ_CMD,
+    status = ipmi_send_message(&data->ipmi, &data->pdev->dev, IPMI_FAN_CPLD_REG_READ_CMD,
                                 data->ipmi_tx_data, 1,
                                 data->ipmi_resp_cpld,
                                 sizeof(data->ipmi_resp_cpld));
@@ -501,7 +552,7 @@ static struct as1813_128o_fan_data *as1813_128o_fan_update_model_serial(int fan_
     case FAN14_MODEL:
     case FAN15_MODEL:
     case FAN16_MODEL:
-        data->ipmi_tx_data[0] = IPMI_FAN_READ_MODEL_CMD;
+        data->ipmi_tx_data[0] = IPMI_FAN_SUBCMD_READ_MODEL;
         string_size = IPMI_FAN_MODEL_SIZE;
         data->ipmi_resp_string[IPMI_FAN_MODEL_SIZE] = '\0';
         break;
@@ -521,7 +572,7 @@ static struct as1813_128o_fan_data *as1813_128o_fan_update_model_serial(int fan_
     case FAN14_SERIAL:
     case FAN15_SERIAL:
     case FAN16_SERIAL:
-        data->ipmi_tx_data[0] = IPMI_FAN_READ_SERIAL_CMD;
+        data->ipmi_tx_data[0] = IPMI_FAN_SUBCMD_READ_SERIAL;
         string_size = IPMI_FAN_SERIAL_SIZE;
         data->ipmi_resp_string[IPMI_FAN_SERIAL_SIZE] = '\0';
         break;
@@ -529,6 +580,15 @@ static struct as1813_128o_fan_data *as1813_128o_fan_update_model_serial(int fan_
         goto exit;
     }
 
+    /*
+     * BMC FRU layout assumption: 8 fan modules numbered 0..7; the front (fid
+     * 0..7) and rear (fid 8..15) rotors of the same module share a single FRU
+     * record. Map fid 8..15 back onto module slot 0..7 before issuing the
+     * IPMI model/serial read.
+     * TODO: [Needs Confirmation] verify this layout against the BMC FRU
+     * mapping table on real hardware; if BMC exposes 16 distinct FRUs,
+     * drop the fan_id - 8 fold below.
+     */
     if (fan_id > 7)
         data->ipmi_tx_data[1] = fan_id - 8;
     else
@@ -565,7 +625,7 @@ static ssize_t show_string(struct device *dev, struct device_attribute *da,
     mutex_lock(&data->update_lock);
 
     /* check fan present */
-    data = as1813_128o_fan_update_device();
+    as1813_128o_fan_update_device();
     if (!data->valid) {
         error = -EIO;
         goto exit;
@@ -575,17 +635,17 @@ static ssize_t show_string(struct device *dev, struct device_attribute *da,
     present = !!data->ipmi_resp[index + FAN_PRESENT];
     if (!present) {
         mutex_unlock(&data->update_lock);
-        return sprintf(buf, "\n");
+        return scnprintf(buf, PAGE_SIZE, "\n");
     }
 
-    data = as1813_128o_fan_update_model_serial(fid, attr->index);
+    as1813_128o_fan_update_model_serial(fid, attr->index);
     if (!data->valid) {
         error = -EIO;
         goto exit;
     }
 
     /* Copy string while still holding the lock */
-    error = sprintf(buf, "%s\n", data->ipmi_resp_string);
+    error = scnprintf(buf, PAGE_SIZE, "%s\n", data->ipmi_resp_string);
     mutex_unlock(&data->update_lock);
     return error;
 
@@ -603,7 +663,7 @@ static ssize_t show_version(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_fan_update_cpld_ver();
+    as1813_128o_fan_update_cpld_ver();
     if (!data->valid) {
         error = -EIO;
         goto exit;
@@ -612,7 +672,7 @@ static ssize_t show_version(struct device *dev, struct device_attribute *da,
     major = data->ipmi_resp_cpld[0];
     minor = data->ipmi_resp_cpld[1];
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%d.%d\n", major, minor);
+    return scnprintf(buf, PAGE_SIZE, "%d.%d\n", major, minor);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -631,7 +691,7 @@ static ssize_t show_dir(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_fan_update_device();
+    as1813_128o_fan_update_device();
     if (!data->valid) {
         error = -EIO;
         goto exit;
@@ -645,10 +705,10 @@ static ssize_t show_dir(struct device *dev, struct device_attribute *da,
     mutex_unlock(&data->update_lock);
 
     if (!present)
-        return sprintf(buf, "0\n");
+        return scnprintf(buf, PAGE_SIZE, "0\n");
     else
-        return sprintf(buf, "%s\n",
-                        (value & BIT(fid % NUM_OF_FAN_MODULE)) ? "B2F" : "F2B");
+        return scnprintf(buf, PAGE_SIZE, "%s\n",
+                        (value & BIT(fid % FAN_DIR_BIT_RANGE)) ? "B2F" : "F2B");
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -661,15 +721,24 @@ static ssize_t show_threshold(struct device *dev, struct device_attribute *da,
     struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
     int value = 0;
     int error = 0;
+    unsigned char fid;
+    int base;
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_fan_update_device();
+    as1813_128o_fan_update_device();
     if (!data->valid) {
         error = -EIO;
         goto exit;
     }
 
+    /*
+     * FAN{n}_TARGET and FAN{n}_TOLERANCE are interleaved in the enum
+     * (target, tolerance, target, tolerance, ...), so 2 attrs per fan.
+     * Derive fid from the offset off the first TARGET id. We cannot use
+     * attr->index / NUM_OF_PER_FAN_ATTR (7) here because threshold ids
+     * live in a separate range that collides with FAN*_PWM values.
+     */
     switch (attr->index) {
     case FAN1_TARGET:
     case FAN2_TARGET:
@@ -687,8 +756,10 @@ static ssize_t show_threshold(struct device *dev, struct device_attribute *da,
     case FAN14_TARGET:
     case FAN15_TARGET:
     case FAN16_TARGET:
-        value = (int)data->ipmi_resp_speed[FAN_TARGET_SPEED0] |
-                (int)data->ipmi_resp_speed[FAN_TARGET_SPEED1] << 8;
+        fid = (attr->index - FAN1_TARGET) / 2;
+        base = fid * FAN_SPEED_DATA_COUNT;
+        value = (int)data->ipmi_resp_speed[base + FAN_TARGET_SPEED0] |
+                (int)data->ipmi_resp_speed[base + FAN_TARGET_SPEED1] << 8;
         break;
     case FAN1_TOLERANCE:
     case FAN2_TOLERANCE:
@@ -706,7 +777,9 @@ static ssize_t show_threshold(struct device *dev, struct device_attribute *da,
     case FAN14_TOLERANCE:
     case FAN15_TOLERANCE:
     case FAN16_TOLERANCE:
-        value = (int)data->ipmi_resp_speed[FAN_SPEED_TOLERANCE];
+        fid = (attr->index - FAN1_TOLERANCE) / 2;
+        base = fid * FAN_SPEED_DATA_COUNT;
+        value = (int)data->ipmi_resp_speed[base + FAN_SPEED_TOLERANCE];
         break;
     default:
         error = -EINVAL;
@@ -714,7 +787,7 @@ static ssize_t show_threshold(struct device *dev, struct device_attribute *da,
     }
 
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%d\n", value);
+    return scnprintf(buf, PAGE_SIZE, "%d\n", value);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -766,29 +839,35 @@ static int __init as1813_128o_fan_init(void)
 
     mutex_init(&data->update_lock);
 
-    ret = platform_driver_register(&as1813_128o_fan_driver);
-    if (ret < 0)
-        goto dri_reg_err;
-
+    /*
+     * Stage the platform device first so we have a struct device to anchor
+     * the IPMI user against, but defer driver registration until IPMI is
+     * fully initialized. Otherwise probe() will publish hwmon sysfs while
+     * data->ipmi.user is still NULL and an early sysfs reader would crash.
+     */
     data->pdev = platform_device_register_simple(DRVNAME, -1, NULL, 0);
     if (IS_ERR(data->pdev)) {
         ret = PTR_ERR(data->pdev);
         goto dev_reg_err;
     }
 
-    /* Set up IPMI interface */
+    /* Set up IPMI interface BEFORE the driver binds and exposes sysfs */
     ret = init_ipmi_data(&data->ipmi, 0, &data->pdev->dev);
     if (ret) {
         goto ipmi_err;
     }
 
+    ret = platform_driver_register(&as1813_128o_fan_driver);
+    if (ret < 0)
+        goto dri_reg_err;
+
     return 0;
 
+dri_reg_err:
+    ipmi_destroy_user(data->ipmi.user);
 ipmi_err:
     platform_device_unregister(data->pdev);
 dev_reg_err:
-    platform_driver_unregister(&as1813_128o_fan_driver);
-dri_reg_err:
     kfree(data);
 alloc_err:
     return ret;
@@ -797,11 +876,11 @@ alloc_err:
 static void __exit as1813_128o_fan_exit(void)
 {
     if (data) {
+        platform_driver_unregister(&as1813_128o_fan_driver);
         ipmi_destroy_user(data->ipmi.user);
         platform_device_unregister(data->pdev);
         kfree(data);
     }
-    platform_driver_unregister(&as1813_128o_fan_driver);
 }
 
 MODULE_AUTHOR("Eric Yang <eric_yang@accton.com>");

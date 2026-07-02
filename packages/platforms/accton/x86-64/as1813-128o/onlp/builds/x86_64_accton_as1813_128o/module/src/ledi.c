@@ -36,6 +36,12 @@
 
 #define LED_FORMAT "/sys/devices/platform/as1813_128o_led/led_%s"
 
+/*
+ * NOTE: enum led_light_mode below MUST stay numerically identical to the
+ * matching enum in modules/builds/src/x86-64-accton-as1813-128o-leds.c so
+ * the integer values written through sysfs round-trip correctly. If you
+ * touch one side, update the other and re-validate led_map[] entries.
+ */
 enum led_light_mode { /*must be the same with the definition @ kernel driver */
 	LED_MODE_OFF,
 	LED_MODE_RED = 10,
@@ -101,20 +107,28 @@ static onlp_led_info_t linfo[] =
         ONLP_LED_STATUS_PRESENT,
         ONLP_LED_CAPS_ON_OFF | ONLP_LED_CAPS_BLUE_BLINKING,
     },
+    /*
+     * DIAG / PSU / FAN LEDs are fully autonomous — BMC decides the colour
+     * based on system health, ONLP callers can only observe (via
+     * onlp_ledi_info_get) but never override. Advertising ONLP_LED_CAPS_AUTO
+     * alone (no ON_OFF/GREEN/RED bits) is how we tell user-space "you can
+     * read me but not write me"; onlp_ledi_mode_set() further returns
+     * ONLP_STATUS_E_UNSUPPORTED for any attempted write on these three.
+     */
     {
         { ONLP_LED_ID_CREATE(LED_DIAG), "Chassis LED 2 (DIAG LED)", 0, {0} },
         ONLP_LED_STATUS_PRESENT,
-        ONLP_LED_CAPS_ON_OFF | ONLP_LED_CAPS_AUTO,
+        ONLP_LED_CAPS_AUTO,
     },
     {
         { ONLP_LED_ID_CREATE(LED_PSU), "Chassis LED 3 (PSU LED)", 0, {0} },
         ONLP_LED_STATUS_PRESENT,
-        ONLP_LED_CAPS_ON_OFF | ONLP_LED_CAPS_AUTO,
+        ONLP_LED_CAPS_AUTO,
     },
     {
         { ONLP_LED_ID_CREATE(LED_FAN), "Chassis LED 4 (FAN LED)", 0, {0} },
         ONLP_LED_STATUS_PRESENT,
-        ONLP_LED_CAPS_ON_OFF | ONLP_LED_CAPS_AUTO,
+        ONLP_LED_CAPS_AUTO,
     },
     {
         { ONLP_LED_ID_CREATE(LED_ALARM), "Chassis LED 5 (ALARM LED)", 0, {0} },
@@ -123,6 +137,13 @@ static onlp_led_info_t linfo[] =
     },
 };
 
+/*
+ * Look up the ONLP mode that the driver value maps to for this LED.
+ * Returns ONLP_LED_MODE_OFF as a *known-safe* default if the driver value
+ * is not in the map (e.g. driver expanded to a new mode we don't track).
+ * The dedicated UNKNOWN sentinel exists in led_light_mode for the reverse
+ * direction; here we still want a valid onlp_led_mode_t.
+ */
 static int driver_to_onlp_led_mode(enum onlp_led_id id, enum led_light_mode driver_led_mode)
 {
     int i, nsize = sizeof(led_map)/sizeof(led_map[0]);
@@ -133,9 +154,16 @@ static int driver_to_onlp_led_mode(enum onlp_led_id id, enum led_light_mode driv
         }
     }
 
-    return 0;
+    return ONLP_LED_MODE_OFF;
 }
 
+/*
+ * Reverse map: return the driver value for the requested ONLP mode, or
+ * LED_MODE_UNKNOWN if the caller asked for an unsupported mode. Callers
+ * MUST treat LED_MODE_UNKNOWN as "not supported" rather than silently
+ * writing it to the kernel (the kernel would reject 99 with -EINVAL,
+ * but checking up-front gives a precise error code to the ONLP caller).
+ */
 static int onlp_to_driver_led_mode(enum onlp_led_id id, onlp_led_mode_t onlp_led_mode)
 {
     int i, nsize = sizeof(led_map)/sizeof(led_map[0]);
@@ -146,7 +174,7 @@ static int onlp_to_driver_led_mode(enum onlp_led_id id, onlp_led_mode_t onlp_led
         }
     }
 
-    return 0;
+    return LED_MODE_UNKNOWN;
 }
 
 /*
@@ -215,11 +243,30 @@ int
 onlp_ledi_mode_set(onlp_oid_t id, onlp_led_mode_t mode)
 {
     int  lid;
+    int  driver_mode;
     VALIDATE(id);
 
     lid = ONLP_OID_ID_GET(id);
 
-    if (onlp_file_write_int(onlp_to_driver_led_mode(lid , mode), LED_FORMAT, leds[lid]) != 0) {
+    /*
+     * DIAG / PSU / FAN LEDs are BMC-controlled only; ONLP callers cannot
+     * override them. Reject writes explicitly rather than let them fall
+     * through into the sysfs write path (where BMC would silently ignore
+     * or reset the value, leaving callers confused about what happened).
+     */
+    if (lid == LED_DIAG || lid == LED_PSU || lid == LED_FAN) {
+        return ONLP_STATUS_E_UNSUPPORTED;
+    }
+
+    driver_mode = onlp_to_driver_led_mode(lid, mode);
+    if (driver_mode == LED_MODE_UNKNOWN) {
+        /* Requested mode is not in led_map[] for this LED id. Tell the
+         * caller it's unsupported instead of silently writing OFF.
+         */
+        return ONLP_STATUS_E_UNSUPPORTED;
+    }
+
+    if (onlp_file_write_int(driver_mode, LED_FORMAT, leds[lid]) != 0) {
         return ONLP_STATUS_E_INTERNAL;
     }
 

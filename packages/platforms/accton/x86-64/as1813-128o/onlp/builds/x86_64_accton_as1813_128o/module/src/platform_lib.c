@@ -64,28 +64,29 @@ enum onlp_fan_dir onlp_get_fan_dir(int fid)
     char *str = NULL;
     char *dirs[FAN_DIR_COUNT] = { "F2B", "B2F" };
     char file[32];
-    enum onlp_fan_dir dir = FAN_DIR_F2B;
+    enum onlp_fan_dir dir = FAN_DIR_UNKNOWN;
 
     hwmon_idx = onlp_get_fan_hwmon_idx();
-    if (hwmon_idx >= 0) {
-        snprintf(file, sizeof(file), "fan%d_dir", fid);
-        len = onlp_file_read_str(&str, FAN_SYSFS_FORMAT_1, hwmon_idx, file);
-
-        if (!str || len < 3) {
-            AIM_FREE_IF_PTR(str);
-            return dir;
-        }
-
-        for (i = 0; i < AIM_ARRAYSIZE(dirs); i++) {
-            if (strncmp(str, dirs[i], strlen(dirs[i])) == 0) {
-                dir = (enum onlp_fan_dir)i;
-                break;
-            }
-        }
-
-        AIM_FREE_IF_PTR(str);
+    if (hwmon_idx < 0) {
+        return FAN_DIR_UNKNOWN;
     }
 
+    snprintf(file, sizeof(file), "fan%d_dir", fid);
+    len = onlp_file_read_str(&str, FAN_SYSFS_FORMAT_1, hwmon_idx, file);
+
+    if (!str || len < 3) {
+        AIM_FREE_IF_PTR(str);
+        return FAN_DIR_UNKNOWN;
+    }
+
+    for (i = 0; i < AIM_ARRAYSIZE(dirs); i++) {
+        if (strncmp(str, dirs[i], strlen(dirs[i])) == 0) {
+            dir = (enum onlp_fan_dir)i;
+            break;
+        }
+    }
+
+    AIM_FREE_IF_PTR(str);
     return dir;
 }
 

@@ -39,6 +39,13 @@
 #define DRVNAME                        "as1813_128o_fpga"
 #define OCORES_I2C_DRVNAME             "ocores-as1813"
 
+/*
+ * 128 OSFP + 2 SFP+ = 130 ports. AS1813_PORT_COUNT — mirrors:
+ *   modules/builds/src/x86-64-accton-as1813-128o-i2c-ocores.c (PORT_NUM)
+ *   onlp/.../module/src/sfpi.c (NUM_OF_SFP_PORT)
+ * Must stay aligned across all three sites (user/kernel are linked
+ * independently so this is a manual invariant).
+ */
 #define PORT_NUM                       130 /* 128 OSFPs 2 SFPs*/
 /*
  * PCIE BAR address
@@ -76,10 +83,10 @@
  *       macro define
  * *********************************************/
 #define pcie_err(fmt, args...) \
-        printk(KERN_ERR "["DRVNAME"]: " fmt " ", ##args)
+        pr_err("["DRVNAME"]: " fmt "\n", ##args)
 
 #define pcie_info(fmt, args...) \
-        printk(KERN_ERR "["DRVNAME"]: " fmt " ", ##args)
+        pr_info("["DRVNAME"]: " fmt "\n", ##args)
 
 
 #define LOCK(lock)      \
@@ -102,9 +109,8 @@ typedef struct pci_fpga_device_s {
     struct platform_device *fpga_i2c[PORT_NUM];
 } pci_fpga_device_t;
 
-/*fpga port status*/
+/*fpga port status */
 struct as1813_128o_fpga_data {
-    u8                  cpld_reg[2];
     unsigned long       last_updated;    /* In jiffies */
     pci_fpga_device_t   pci_fpga_dev;
 };
@@ -819,7 +825,13 @@ struct attribute_mapping {
     u16 reg;
     u16 spi_mux;
     u16 mask;
-    u8 revert;
+    u8 revert;  /* if 1, sysfs read inverts the masked bit and sysfs write
+                 * stores the inverted user input. Today every entry in
+                 * attribute_mappings[] uses revert=1 because the CPLD
+                 * exposes the signals as active-low. Keep the column so
+                 * a future port that wires the signal active-high can
+                 * set revert=0 without touching status_read/write code.
+                 */
 };
 
 // Define an array of attribute mappings
@@ -1008,7 +1020,7 @@ static struct attribute_mapping attribute_mappings[] = {
     [MODULE_RESET_127]   = {CPLD_PCIE_START_OFFSET + 0x79, SPI_MUX_MEZZ_BOT_R, 0x01 << 6, 1}, //RESET port127
     [MODULE_RESET_128]   = {CPLD_PCIE_START_OFFSET + 0x79, SPI_MUX_MEZZ_BOT_R, 0x01 << 7, 1}, //RESET port128
     [MODULE_LPMODE_71]   = {CPLD_PCIE_START_OFFSET + 0x70, SPI_MUX_MEZZ_BOT_R, 0x01 << 0, 1}, //LPMODE port71
-    [MODULE_LPMODE_72]   = {CPLD_PCIE_START_OFFSET + 0x70, SPI_MUX_MEZZ_BOT_R, 0x01 << 1, 1}, //LPMODE port71
+    [MODULE_LPMODE_72]   = {CPLD_PCIE_START_OFFSET + 0x70, SPI_MUX_MEZZ_BOT_R, 0x01 << 1, 1}, //LPMODE port72
     [MODULE_LPMODE_79]   = {CPLD_PCIE_START_OFFSET + 0x70, SPI_MUX_MEZZ_BOT_R, 0x01 << 2, 1}, //LPMODE port79
     [MODULE_LPMODE_80]   = {CPLD_PCIE_START_OFFSET + 0x70, SPI_MUX_MEZZ_BOT_R, 0x01 << 3, 1}, //LPMODE port80
     [MODULE_LPMODE_87]   = {CPLD_PCIE_START_OFFSET + 0x70, SPI_MUX_MEZZ_BOT_R, 0x01 << 4, 1}, //LPMODE port87
@@ -1262,7 +1274,7 @@ static ssize_t status_read(struct device *dev, struct device_attribute *da, char
 
     if (attribute_mappings[attr->index].revert) 
         reg_val = !reg_val;
-    ret = sprintf(buf, "%u\n", reg_val);
+    ret = scnprintf(buf, PAGE_SIZE, "%u\n", reg_val);
 
     return ret;
 }
@@ -1281,6 +1293,12 @@ static ssize_t status_write(struct device *dev, struct device_attribute *da,
     status = kstrtou8(buf, 10, &input);
     if (status) {
         return status;
+    }
+    /* sysfs interface accepts a boolean (0 = clear bit, 1 = set bit);
+     * reject any other value to avoid ambiguous semantics for callers.
+     */
+    if (input > 1) {
+        return -EINVAL;
     }
 
     reg = attribute_mappings[attr->index].reg;
@@ -1306,7 +1324,15 @@ struct _port_data {
     u16 offset;
     u16 spi_mux;
 };
-/* ============PCIe Bar Offset to I2C Master Mapping============== */
+/*
+ * ============PCIe Bar Offset to I2C Master Mapping==============
+ *
+ * NOTE: the per-port SPI mux assignments below MUST stay in sync with
+ * port_mux[] in modules/builds/src/x86-64-accton-as1813-128o-i2c-ocores.c.
+ * Both arrays are sized PORT_NUM and indexed by the same port index; if
+ * you change one, change the other in the same patch. Search keyword:
+ * AS1813_PORT_TOPOLOGY.
+ */
 static const struct _port_data port[PORT_NUM]= {
     /* MEZZ_TOP_L */
     {0x2100, SPI_MUX_MEZZ_TOP_L},/* 0x2100 - 0x2110  I2C Master OSFP port1 */
@@ -1617,7 +1643,10 @@ static int as1813_128o_pcie_fpga_stat_probe(struct platform_device *pdev)
         dev_err(dev, "Cannot enable PCI device(%x:%x)\n",
                      FPGA_PCI_VENDOR_ID, FPGA_PCI_DEVICE_ID);
         status = -ENODEV;
-        goto exit_pci_disable;
+        /* enable failed -> only release the pci_get_device ref;
+         * must NOT call pci_disable_device on a device that was never enabled.
+         */
+        goto exit_pci_put;
     }
     /* enable PCI bus-mastering */
     pci_set_master(pcidev);
@@ -1643,14 +1672,16 @@ static int as1813_128o_pcie_fpga_stat_probe(struct platform_device *pdev)
      */
     bar_base = pci_resource_start(pcidev, BAR0_NUM);
     for (i = 0; i < PORT_NUM; i++) {
-        iowrite8(port[i].spi_mux, spi_mux_reg);
-
         fpga_ctl->pci_fpga_dev.fpga_i2c[i] =
             ocore_i2c_device_add(i, bar_base, port[i].offset);
-        if (IS_ERR(fpga_ctl->pci_fpga_dev.fpga_i2c[i])) {
-            status = PTR_ERR(fpga_ctl->pci_fpga_dev.fpga_i2c[i]);
-            dev_err(dev, "rc:%d, unload Port%u[0x%ux] device\n",
-                         status, i, port[i].offset);
+        /* ocore_i2c_device_add() returns NULL on failure (not ERR_PTR),
+         * so check for NULL explicitly; otherwise a later
+         * platform_device_unregister(NULL) in remove() would oops.
+         */
+        if (!fpga_ctl->pci_fpga_dev.fpga_i2c[i]) {
+            status = -ENODEV;
+            dev_err(dev, "Failed to add ocore device for Port%u[0x%ux]\n",
+                         i, port[i].offset);
             goto exit_ocores_device;
         }
     }
@@ -1665,12 +1696,19 @@ static int as1813_128o_pcie_fpga_stat_probe(struct platform_device *pdev)
 exit_ocores_device:
     while (i > 0) {
         i--;
-        platform_device_unregister(fpga_ctl->pci_fpga_dev.fpga_i2c[i]);
+        if (fpga_ctl->pci_fpga_dev.fpga_i2c[i])
+            platform_device_unregister(fpga_ctl->pci_fpga_dev.fpga_i2c[i]);
     }
+    spin_lock(&cpld_access_lock);
     spi_busy_reg = NULL;
+    spi_mux_reg = NULL;
+    spin_unlock(&cpld_access_lock);
     pci_iounmap(fpga_ctl->pci_fpga_dev.pci_dev, fpga_ctl->pci_fpga_dev.data_base_addr0);
 exit_pci_disable:
     pci_disable_device(fpga_ctl->pci_fpga_dev.pci_dev);
+exit_pci_put:
+    /* Pair with pci_get_device() above: release ref on all error paths. */
+    pci_dev_put(fpga_ctl->pci_fpga_dev.pci_dev);
 
     return status;
 }
@@ -1685,12 +1723,23 @@ static int as1813_128o_pcie_fpga_stat_remove(struct platform_device *pdev)
         sysfs_remove_group(&pdev->dev.kobj, &fpga_port_stat_group);
         /* Unregister ocore_i2c device */
         for (i = 0; i < PORT_NUM; i++) {
-            platform_device_unregister(fpga_ctl->pci_fpga_dev.fpga_i2c[i]);
+            if (fpga_ctl->pci_fpga_dev.fpga_i2c[i])
+                platform_device_unregister(fpga_ctl->pci_fpga_dev.fpga_i2c[i]);
         }
+        /* Serialize against any in-flight wait_spi() ioread8 on spi_busy_reg
+         * before we unmap the BAR. ocores xfer is already quiesced by the
+         * platform_device_unregister loop above; the lock here closes the
+         * remaining window between READ_ONCE and pci_iounmap.
+         */
+        spin_lock(&cpld_access_lock);
         spi_busy_reg = NULL;
+        spi_mux_reg = NULL;
+        spin_unlock(&cpld_access_lock);
         pci_iounmap(fpga_ctl->pci_fpga_dev.pci_dev, fpga_ctl->pci_fpga_dev.data_base_addr0);
         pci_disable_device(fpga_ctl->pci_fpga_dev.pci_dev);
     }
+    /* Pair with pci_get_device() in probe(); must run regardless of enable state. */
+    pci_dev_put(fpga_ctl->pci_fpga_dev.pci_dev);
 
     return 0;
 }

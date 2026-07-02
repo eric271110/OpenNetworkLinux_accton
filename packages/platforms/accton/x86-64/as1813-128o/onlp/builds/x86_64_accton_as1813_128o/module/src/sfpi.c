@@ -62,6 +62,14 @@
 #define MODULE_RESET_FORMAT        "/sys/devices/platform/as1813_128o_fpga/module_reset_%d"
 #define MODULE_LPMODE_FORMAT       "/sys/devices/platform/as1813_128o_fpga/module_lp_mode_%d"
 
+/*
+ * Total port count (128 OSFP + 2 SFP+). Mirrors PORT_NUM in
+ *   modules/builds/src/x86-64-accton-as1813-128o-fpga.c
+ *   modules/builds/src/x86-64-accton-as1813-128o-i2c-ocores.c
+ * All three constants must stay aligned; user-space and kernel
+ * are linked separately so this is a manual invariant. Search keyword:
+ * AS1813_PORT_COUNT.
+ */
 #define NUM_OF_SFP_PORT 130
 static const int port_bus_index[NUM_OF_SFP_PORT] = {
      2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
@@ -347,15 +355,21 @@ onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
 
     switch(control) {
     case ONLP_SFP_CONTROL_RX_LOS: {
-        *value = 0;
         if (port >= SFP_PORT_MIN && port <= SFP_PORT_MAX) {
+            *value = 0;
             if (onlp_file_read_int(value, MODULE_RXLOS_FORMAT, port) < 0) {
                 AIM_LOG_ERROR("Unable to read rx_loss status from port(%d)\r\n", port);
                 return ONLP_STATUS_E_INTERNAL;
             }
+            return ONLP_STATUS_OK;
         }
-
-        return ONLP_STATUS_OK;
+        /*
+         * OSFP RX_LOS is per-lane and lives on EEPROM Page 11h;
+         * not routed through a CPLD sysfs today. Report unsupported
+         * rather than silently returning 0 which would look like
+         * "no fault" to SNMP/CLI.
+         */
+        return ONLP_STATUS_E_UNSUPPORTED;
     }
 
     case ONLP_SFP_CONTROL_TX_FAULT: {

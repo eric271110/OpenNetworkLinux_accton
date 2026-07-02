@@ -50,6 +50,18 @@ enum fan_id {
     FAN_1_ON_PSU_4
 };
 
+/*
+ * Maximum rotor RPM reported by the BMC at 100% PWM. Used to derive
+ * a "percentage" reading from the raw RPM value for ONLP. The exact
+ * numbers come from the fan vendor's datasheet (12V max-RPM spec):
+ *
+ *   - Chassis fan front rotor (FAN_1..FAN_8): 15400 RPM
+ *   - Chassis fan rear  rotor (FAN_9..FAN_16): 13600 RPM
+ *   - PSU fan: 35000 RPM (vendor spec; PSU-internal closed loop)
+ *
+ * TODO: move these into a per-SKU table once the platform ships
+ * multiple fan vendors.
+ */
 #define MAX_PSU_FAN_SPEED 35000
 
 #define MAX_FAN_FRONT_SPEED 15400
@@ -116,10 +128,14 @@ _onlp_fani_set_fan_dir_info(int fid, onlp_fan_info_t* info)
         info->caps |= ONLP_FAN_CAPS_F2B;
         info->status |= ONLP_FAN_STATUS_F2B;
     }
-    else {
+    else if (FAN_DIR_B2F == dir) {
         info->caps |= ONLP_FAN_CAPS_B2F;
         info->status |= ONLP_FAN_STATUS_B2F;
     }
+    /* else: direction unknown (e.g. fan absent or sysfs read failed).
+     * Leave caps/status untouched rather than asserting a direction
+     * that the hardware did not actually report.
+     */
 
     return ONLP_STATUS_OK;
 }
@@ -196,6 +212,9 @@ _onlp_fani_info_get_fan(int fid, onlp_fan_info_t* info)
             info->serial[copy_len] = '\0';
         }
         AIM_FREE_IF_PTR(str);
+    } else {
+        AIM_LOG_INFO("fan%d: hwmon node missing; leaving model/serial blank",
+                     fid);
     }
 
     _onlp_fani_set_fan_dir_info(fid, info);
@@ -208,11 +227,11 @@ _onlp_fani_info_get_fan_on_psu(int pid, onlp_fan_info_t* info)
 {
     char *str = NULL;
     int   len = 0;
-	int   val = 0;
+    int   val = 0;
     int   ret = 0;
     int   hwmon_idx;
 
-	info->status |= ONLP_FAN_STATUS_PRESENT;
+    info->status |= ONLP_FAN_STATUS_PRESENT;
 
     /* get fan direction
      */

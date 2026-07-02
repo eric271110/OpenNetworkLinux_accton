@@ -78,12 +78,13 @@ onlp_psui_info_get(onlp_oid_t id, onlp_psu_info_t* info)
     /* Get the present state */
     ret = onlp_file_read_int(&val, PSU_SYSFS_FORMAT, (pid-1), pid, "present");
     if (ret < 0) {
-        info->status &= ~ONLP_PSU_STATUS_PRESENT;
+        /* info is zero-initialized above so PRESENT bit is already clear;
+         * no need to mask it again.
+         */
         return ONLP_STATUS_E_INTERNAL;
     }
 
     if (val != PSU_STATUS_PRESENT) {
-        info->status &= ~ONLP_PSU_STATUS_PRESENT;
         return ONLP_STATUS_OK;
     }
     info->status |= ONLP_PSU_STATUS_PRESENT;
@@ -101,6 +102,10 @@ onlp_psui_info_get(onlp_oid_t id, onlp_psu_info_t* info)
     }
 
     /* Set capability
+     * TODO: hard-coded as AC because this platform currently only ships
+     * with AC PSUs. When DC PSUs become a SKU, switch to reading PSU type
+     * from BMC (FRU "PSU type" field) and pick ONLP_PSU_CAPS_AC vs
+     * ONLP_PSU_CAPS_DC48 accordingly.
      */
     info->caps = ONLP_PSU_CAPS_AC;
 

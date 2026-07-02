@@ -79,6 +79,12 @@ enum ipmi_led_light_mode {
     IPMI_LED_MODE_ORANGE = 0x20,
 };
 
+/*
+ * NOTE: enum led_light_mode below MUST stay numerically identical to the
+ * matching enum in onlp/.../ledi.c so the integer values written through
+ * sysfs round-trip correctly. If you touch one side, update the other and
+ * re-validate the ONLP led_map[] entries.
+ */
 enum led_light_mode {
     LED_MODE_OFF,
     LED_MODE_RED = 10,
@@ -170,7 +176,7 @@ static ssize_t show_led(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_led_update_device();
+    as1813_128o_led_update_device();
     if (!data->valid) {
         error = -EIO;
         goto exit;
@@ -216,7 +222,7 @@ static ssize_t show_led(struct device *dev, struct device_attribute *da,
     }
 
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%d\n", value);
+    return scnprintf(buf, PAGE_SIZE, "%d\n", value);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -236,7 +242,7 @@ static ssize_t set_led(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_led_update_device();
+    as1813_128o_led_update_device();
     if (!data->valid) {
         status = -EIO;
         goto exit;
@@ -339,10 +345,9 @@ static int __init as1813_128o_led_init(void)
     mutex_init(&data->update_lock);
     data->valid = 0;
 
-    ret = platform_driver_register(&as1813_128o_led_driver);
-    if (ret < 0)
-        goto dri_reg_err;
-
+    /* Stage device + IPMI before binding the driver so probe() never
+     * publishes sysfs while data->ipmi.user is still NULL.
+     */
     data->pdev = platform_device_register_simple(DRVNAME, -1, NULL, 0);
     if (IS_ERR(data->pdev)) {
         ret = PTR_ERR(data->pdev);
@@ -354,13 +359,17 @@ static int __init as1813_128o_led_init(void)
     if (ret)
         goto ipmi_err;
 
+    ret = platform_driver_register(&as1813_128o_led_driver);
+    if (ret < 0)
+        goto dri_reg_err;
+
     return 0;
 
+dri_reg_err:
+    ipmi_destroy_user(data->ipmi.user);
 ipmi_err:
     platform_device_unregister(data->pdev);
 dev_reg_err:
-    platform_driver_unregister(&as1813_128o_led_driver);
-dri_reg_err:
     kfree(data);
 alloc_err:
     return ret;
@@ -368,9 +377,9 @@ alloc_err:
 
 static void __exit as1813_128o_led_exit(void)
 {
+    platform_driver_unregister(&as1813_128o_led_driver);
     ipmi_destroy_user(data->ipmi.user);
     platform_device_unregister(data->pdev);
-    platform_driver_unregister(&as1813_128o_led_driver);
     kfree(data);
 }
 

@@ -1,3 +1,7 @@
+# TODO(as1813-128o): `commands` was removed in Python 3. When ONL host image
+# is migrated off Python 2, replace `commands.getstatusoutput(...)` with
+# `subprocess.getstatusoutput(...)` (Py3 stdlib). Kept as-is for now to
+# match the current ONL onlpsyshelper.py runtime which is still Py2.
 import commands
 from itertools import chain
 from onl.platform.base import *
@@ -84,8 +88,7 @@ class OnlPlatform_x86_64_accton_as1813_128o_r0(OnlPlatformAccton,
         self.modprobe('at24')
         self.modprobe('k10temp')
 
-        #for m in [ 'i2c-ocores', 'fpga', 'fan', 'psu', 'thermal', 'sys', 'leds' ]:
-        for m in [ 'i2c-ocores', 'fpga', 'thermal', 'sys' ]:
+        for m in [ 'i2c-ocores', 'fpga', 'fan', 'psu', 'thermal', 'sys', 'leds' ]:
             self.insmod("x86-64-accton-as1813-128o-%s" % m)
 
         ########### initialize I2C bus 0 ###########

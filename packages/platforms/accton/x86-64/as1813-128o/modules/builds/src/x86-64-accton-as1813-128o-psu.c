@@ -553,7 +553,7 @@ static ssize_t show_psu(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_psu_update_device(da);
+    as1813_128o_psu_update_device(da);
     if (!data->valid[pid]) {
         error = -EIO;
         goto exit;
@@ -676,7 +676,7 @@ static ssize_t show_psu(struct device *dev, struct device_attribute *da,
 
     mutex_unlock(&data->update_lock);
 
-    return sprintf(buf, "%d\n", present ? value : 0);
+    return scnprintf(buf, PAGE_SIZE, "%d\n", present ? value : 0);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -694,7 +694,7 @@ static ssize_t show_psu_info(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_psu_update_device(da);
+    as1813_128o_psu_update_device(da);
     if (!data->valid[pid]) {
         error = -EIO;
         goto exit;
@@ -858,7 +858,7 @@ static ssize_t show_psu_info(struct device *dev, struct device_attribute *da,
 
     mutex_unlock(&data->update_lock);
 
-    return sprintf(buf, "%d\n", present ? value : 0);
+    return scnprintf(buf, PAGE_SIZE, "%d\n", present ? value : 0);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -875,7 +875,7 @@ static ssize_t show_string(struct device *dev, struct device_attribute *da,
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_psu_update_device(da);
+    as1813_128o_psu_update_device(da);
     if (!data->valid[pid]) {
         error = -EIO;
         goto exit;
@@ -909,7 +909,7 @@ static ssize_t show_string(struct device *dev, struct device_attribute *da,
     }
 
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%s\n", str);
+    return scnprintf(buf, PAGE_SIZE, "%s\n", str);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -962,10 +962,10 @@ static int __init as1813_128o_psu_init(void)
 
     mutex_init(&data->update_lock);
 
-    ret = platform_driver_register(&as1813_128o_psu_driver);
-    if (ret < 0)
-        goto dri_reg_err;
-
+    /*
+     * Register the platform devices and IPMI user BEFORE binding the driver,
+     * so probe() does not expose hwmon/sysfs while data->ipmi.user is NULL.
+     */
     for (i = 0; i < NUM_OF_PSU; i++) {
         data->pdev[i] = platform_device_register_simple(DRVNAME, i, NULL, 0);
         if (IS_ERR(data->pdev[i])) {
@@ -979,16 +979,21 @@ static int __init as1813_128o_psu_init(void)
     if (ret)
         goto ipmi_err;
 
+    ret = platform_driver_register(&as1813_128o_psu_driver);
+    if (ret < 0)
+        goto dri_reg_err;
+
     return 0;
 
+dri_reg_err:
+    ipmi_destroy_user(data->ipmi.user);
 ipmi_err:
+    /* Roll back every platform_device we successfully registered above. */
+dev_reg_err:
     while (i > 0) {
         i--;
         platform_device_unregister(data->pdev[i]);
     }
-dev_reg_err:
-    platform_driver_unregister(&as1813_128o_psu_driver);
-dri_reg_err:
     kfree(data);
 alloc_err:
     return ret;
@@ -998,11 +1003,11 @@ static void __exit as1813_128o_psu_exit(void)
 {
     int i;
 
+    platform_driver_unregister(&as1813_128o_psu_driver);
     ipmi_destroy_user(data->ipmi.user);
     for (i = 0; i < NUM_OF_PSU; i++) {
         platform_device_unregister(data->pdev[i]);
     }
-    platform_driver_unregister(&as1813_128o_psu_driver);
     kfree(data);
 }
 

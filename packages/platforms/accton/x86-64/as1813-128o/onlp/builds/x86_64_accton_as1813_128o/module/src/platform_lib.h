@@ -90,7 +90,13 @@ enum onlp_led_id {
 enum onlp_fan_dir {
     FAN_DIR_F2B,
     FAN_DIR_B2F,
-    FAN_DIR_COUNT
+    FAN_DIR_COUNT,
+    /*
+     * Returned when the fan direction cannot be determined
+     * (hwmon node missing, sysfs read failed, or fan absent).
+     * Callers must not use this as an array index.
+     */
+    FAN_DIR_UNKNOWN = -1,
 };
 
 enum onlp_fan_dir onlp_get_fan_dir(int fid);

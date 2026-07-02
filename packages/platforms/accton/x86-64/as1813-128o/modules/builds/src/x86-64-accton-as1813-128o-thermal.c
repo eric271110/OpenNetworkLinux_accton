@@ -139,6 +139,7 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *da,
                             char *buf)
 {
     int status = 0;
+    int mcelsius = 0;
     int index  = 0;
     struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
 
@@ -170,10 +171,10 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *da,
 
     /* Get temperature in degree celsius */
     index = attr->index * TEMP_DATA_COUNT + TEMP_INPUT;
-    status = ((s8)data->ipmi_resp[index]) * 1000;
+    mcelsius = ((s8)data->ipmi_resp[index]) * 1000;
 
     mutex_unlock(&data->update_lock);
-    return sprintf(buf, "%d\n", status);
+    return scnprintf(buf, PAGE_SIZE, "%d\n", mcelsius);
 
 exit:
     mutex_unlock(&data->update_lock);
@@ -225,10 +226,9 @@ static int __init as1813_128o_thermal_init(void)
 
     mutex_init(&data->update_lock);
 
-    ret = platform_driver_register(&as1813_128o_thermal_driver);
-    if (ret < 0)
-        goto dri_reg_err;
-
+    /* Stage device + IPMI before binding the driver so probe() never
+     * publishes hwmon/sysfs while data->ipmi.user is still NULL.
+     */
     data->pdev = platform_device_register_simple(DRVNAME, -1, NULL, 0);
     if (IS_ERR(data->pdev)) {
         ret = PTR_ERR(data->pdev);
@@ -241,13 +241,17 @@ static int __init as1813_128o_thermal_init(void)
         goto ipmi_err;
     }
 
+    ret = platform_driver_register(&as1813_128o_thermal_driver);
+    if (ret < 0)
+        goto dri_reg_err;
+
     return 0;
 
+dri_reg_err:
+    ipmi_destroy_user(data->ipmi.user);
 ipmi_err:
     platform_device_unregister(data->pdev);
 dev_reg_err:
-    platform_driver_unregister(&as1813_128o_thermal_driver);
-dri_reg_err:
     kfree(data);
 alloc_err:
     return ret;
@@ -256,9 +260,9 @@ alloc_err:
 static void __exit as1813_128o_thermal_exit(void)
 {
     if (data) {
+        platform_driver_unregister(&as1813_128o_thermal_driver);
         ipmi_destroy_user(data->ipmi.user);
         platform_device_unregister(data->pdev);
-        platform_driver_unregister(&as1813_128o_thermal_driver);
         kfree(data);
     }
 }

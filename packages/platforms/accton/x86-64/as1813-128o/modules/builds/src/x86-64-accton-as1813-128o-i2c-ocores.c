@@ -86,6 +86,12 @@ struct ocores_i2c {
 
 #define SPI_BUSY_MASK_CPLD             0x01
 
+/*
+ * Total port count (128 OSFP + 2 SFP+). Mirrors PORT_NUM in
+ *   modules/builds/src/x86-64-accton-as1813-128o-fpga.c
+ *   onlp/.../module/src/sfpi.c (NUM_OF_SFP_PORT)
+ * Must stay aligned across all three sites; AS1813_PORT_COUNT.
+ */
 #define PORT_NUM 130
 /*FPGA SPI MUX*/
 #define SPI_MUX_MB_CPLD0               0x0
@@ -95,7 +101,7 @@ struct ocores_i2c {
 #define SPI_MUX_MEZZ_TOP_L             0x4
 #define SPI_MUX_MEZZ_TOP_R             0x5
 
-static unsigned int timeout = 1;
+static unsigned int timeout = 50;
 module_param(timeout, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(timeout, "Timeout for ocores_poll_wait, in milliseconds");
 
@@ -123,6 +129,13 @@ EXPORT_SYMBOL(spi_busy_reg);
 EXPORT_SYMBOL(spi_mux_reg);
 
 static const int port_mux[PORT_NUM]= {
+    /*
+     * NOTE: keep in sync with port[].spi_mux in
+     * modules/builds/src/x86-64-accton-as1813-128o-fpga.c. Both arrays
+     * are sized PORT_NUM and indexed by the same port index; if you
+     * change one, change the other in the same patch. Search keyword:
+     * AS1813_PORT_TOPOLOGY.
+     */
     /* MEZZ_TOP_L */
     SPI_MUX_MEZZ_TOP_L, /* OSFP port1 */
     SPI_MUX_MEZZ_TOP_L, /* OSFP port2 */
@@ -305,45 +318,51 @@ static const int port_mux[PORT_NUM]= {
 };
 
 int wait_spi(u32 mask, u8 times) {
-	u32 data;
-	u32 ri = 0;
-	unsigned long j;
+    u32 data;
+    u32 ri = 0;
+    unsigned long j;
 
-	/* pr_info("CPLD %u, Will time-out at jiffie %lu\n", cpld_id,times); */
-	if (!spi_busy_reg) {
-		return -EFAULT;
-	}
+    /* pr_info("CPLD %u, Will time-out at jiffie %lu\n", cpld_id,times); */
+    if (!spi_busy_reg) {
+        return -EFAULT;
+    }
 
-	j = jiffies + times;
-	while (1) {
-		data = ioread8(spi_busy_reg);
-		if (!(((data) & 0xFF) & mask)) {
-			break;
-		}
+    j = jiffies + times;
+    while (1) {
+        data = ioread8(spi_busy_reg);
+        if (!(((data) & 0xFF) & mask)) {
+            break;
+        }
 
-		if (time_after(jiffies, j)) {
-			if (debug) {
-				pr_warn("@ %u, wait_spi TIMEOUT \n", ri);
-			}
-			return -ETIMEDOUT;
-		}
+        if (time_after(jiffies, j)) {
+            if (debug) {
+                pr_warn("@ %u, wait_spi TIMEOUT \n", ri);
+            }
+            return -ETIMEDOUT;
+        }
 
-		ri++;
-	}
+        ri++;
+    }
 
-	return 0;
+    return 0;
 }
 EXPORT_SYMBOL(wait_spi);
 
 static inline void oc_setreg(struct ocores_i2c *i2c, int reg, u8 value)
 {
-    wait_spi(SPI_BUSY_MASK_CPLD, 6);
+    int err = wait_spi(SPI_BUSY_MASK_CPLD, 6);
+    if (unlikely(err) && debug)
+        pr_warn_ratelimited("oc_setreg: wait_spi ret %d before reg=%d\n",
+                            err, reg);
     i2c->setreg(i2c, reg, value);
 }
 
 static inline u8 oc_getreg(struct ocores_i2c *i2c, int reg)
 {
-    wait_spi(SPI_BUSY_MASK_CPLD, 6);
+    int err = wait_spi(SPI_BUSY_MASK_CPLD, 6);
+    if (unlikely(err) && debug)
+        pr_warn_ratelimited("oc_getreg: wait_spi ret %d before reg=%d\n",
+                            err, reg);
     return i2c->getreg(i2c, reg);
 }
 
@@ -362,16 +381,6 @@ static void oc_setreg_32(struct ocores_i2c *i2c, int reg, u8 value)
     iowrite32(value, i2c->base + (reg << i2c->reg_shift));
 }
 
-static void oc_setreg_16be(struct ocores_i2c *i2c, int reg, u8 value)
-{
-    iowrite16be(value, i2c->base + (reg << i2c->reg_shift));
-}
-
-static void oc_setreg_32be(struct ocores_i2c *i2c, int reg, u8 value)
-{
-    iowrite32be(value, i2c->base + (reg << i2c->reg_shift));
-}
-
 static inline u8 oc_getreg_8(struct ocores_i2c *i2c, int reg)
 {
     return ioread8(i2c->base + (reg << i2c->reg_shift));
@@ -386,16 +395,12 @@ static inline u8 oc_getreg_32(struct ocores_i2c *i2c, int reg)
 {
     return ioread32(i2c->base + (reg << i2c->reg_shift));
 }
-
-static inline u8 oc_getreg_16be(struct ocores_i2c *i2c, int reg)
-{
-    return ioread16be(i2c->base + (reg << i2c->reg_shift));
-}
-
-static inline u8 oc_getreg_32be(struct ocores_i2c *i2c, int reg)
-{
-    return ioread32be(i2c->base + (reg << i2c->reg_shift));
-}
+/*
+ * NOTE: big-endian variants (oc_setreg_16be/32be, oc_getreg_16be/32be) were
+ * inherited from the mainline i2c-ocores driver but this platform's FPGA
+ * exposes registers in little-endian only; probe() switch(reg_io_width)
+ * never selects them. Removed to keep the driver surface honest.
+ */
 
 static void oc_setreg_io_8(struct ocores_i2c *i2c, int reg, u8 value)
 {
@@ -849,7 +854,14 @@ static int ocores_i2c_probe(struct platform_device *pdev)
 
     /* add in known devices to the bus */
     for (i = 0; i < pdata->num_devices; i++) {
-        i2c_new_client_device(&i2c->adap, pdata->devices + i);
+        struct i2c_client *client =
+            i2c_new_client_device(&i2c->adap, pdata->devices + i);
+        if (IS_ERR(client)) {
+            dev_warn(&pdev->dev,
+                     "Failed to register i2c client device %s@0x%02x (err %ld)\n",
+                     pdata->devices[i].type, pdata->devices[i].addr,
+                     PTR_ERR(client));
+        }
     }
 
     return 0;

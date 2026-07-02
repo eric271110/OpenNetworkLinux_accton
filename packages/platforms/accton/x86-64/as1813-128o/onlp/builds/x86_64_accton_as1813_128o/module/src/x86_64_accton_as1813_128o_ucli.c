@@ -23,7 +23,7 @@ x86_64_accton_as1813_128o_ucli_ucli__config__(ucli_context_t* uc)
 static ucli_module_t
 x86_64_accton_as1813_128o_ucli_module__ =
     {
-        "x86_64_accton_as1813_128_ucli",
+        "x86_64_accton_as1813_128o_ucli",
         NULL,
         x86_64_accton_as1813_128o_ucli_ucli_handlers__,
         NULL,

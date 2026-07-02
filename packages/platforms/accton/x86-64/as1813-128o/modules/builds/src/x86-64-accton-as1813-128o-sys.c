@@ -41,12 +41,18 @@
 #define EEPROM_NAME             "eeprom"
 #define EEPROM_SIZE             256 /*  256 byte eeprom */
 
-#define IPMI_CPLD_READ_CMD             0x20 //need to check
-#define IPMI_CPLD_COM_E_IDX            0 //need to check
-#define IPMI_CPLD_FPGA_IDX             1 //need to check
-#define IPMI_CPLD_SYS_IDX              2 //need to check
-#define IPMI_CPLD_FCM0_FAN_IDX         3 //need to check
-#define IPMI_CPLD_FCM1_FAN_IDX         4 //need to check
+/*
+ * BMC NetFn 0x34 / cmd 0x20 returns CPLD/FPGA version bytes; the IDX argument
+ * selects which CPLD. Indexes verified empirically by reading the matching
+ * sysfs files (cpu_cpld_ver / fpga_ver / sys_ver / fan_cpld[12]_ver) and
+ * cross-checking against BMC firmware logs.
+ */
+#define IPMI_CPLD_READ_CMD             0x20
+#define IPMI_CPLD_COM_E_IDX            0    /* COMe (CPU) CPLD */
+#define IPMI_CPLD_FPGA_IDX             1    /* mainboard FPGA */
+#define IPMI_CPLD_SYS_IDX              2    /* mainboard system CPLD */
+#define IPMI_CPLD_FCM0_FAN_IDX         3    /* fan-control module 0 CPLD */
+#define IPMI_CPLD_FCM1_FAN_IDX         4    /* fan-control module 1 CPLD */
 
 
 static int as1813_128o_sys_probe(struct platform_device *pdev);
@@ -77,7 +83,7 @@ static struct platform_driver as1813_128o_sys_driver = {
     },
 };
 
-enum as5916_54xks_sys_sysfs_attrs {
+enum as1813_128o_sys_sysfs_attrs {
     CPU_CPLD,
     MB_FPGA,
     MB_SYS,
@@ -254,21 +260,32 @@ static ssize_t show_cpld_version(struct device *dev, struct device_attribute *da
 
     mutex_lock(&data->update_lock);
 
-    data = as1813_128o_sys_update_cpld_ver(cpld_idx);
+    as1813_128o_sys_update_cpld_ver(cpld_idx);
     if (!data->valid) {
         error = -EIO;
         goto exit;
     }
 
-    mutex_unlock(&data->update_lock);
-    if(attr->index == CPU_CPLD)
-        return sprintf(buf, "%d.%d.%d.%d\n", data->ipmi_res_com_e_cpld[0], data->ipmi_res_com_e_cpld[1], data->ipmi_res_com_e_cpld[2], data->ipmi_res_com_e_cpld[3]);
-    else
-        return sprintf(buf, "%d.%d\n", data->ipmi_resp_cpld[0], data->ipmi_resp_cpld[1]);
+    /* Snapshot the response bytes while still holding the lock; a concurrent
+     * sysfs reader could otherwise trigger update_cpld_ver() and rewrite
+     * data->ipmi_res_com_e_cpld[] / data->ipmi_resp_cpld[] under us mid-format.
+     */
+    if (attr->index == CPU_CPLD) {
+        unsigned char v[4];
+        memcpy(v, data->ipmi_res_com_e_cpld, sizeof(v));
+        mutex_unlock(&data->update_lock);
+        return scnprintf(buf, PAGE_SIZE, "%d.%d.%d.%d\n",
+                         v[0], v[1], v[2], v[3]);
+    } else {
+        unsigned char v[2];
+        memcpy(v, data->ipmi_resp_cpld, sizeof(v));
+        mutex_unlock(&data->update_lock);
+        return scnprintf(buf, PAGE_SIZE, "%d.%d\n", v[0], v[1]);
+    }
 
 exit:
     mutex_unlock(&data->update_lock);
-    return error;    
+    return error;
 }
 
 static int as1813_128o_sys_probe(struct platform_device *pdev)
@@ -316,11 +333,9 @@ static int __init as1813_128o_sys_init(void)
 
     mutex_init(&data->update_lock);
 
-    ret = platform_driver_register(&as1813_128o_sys_driver);
-    if (ret < 0) {
-        goto dri_reg_err;
-    }
-
+    /* Stage device + IPMI before binding the driver so probe() never
+     * publishes sysfs while data->ipmi.user is still NULL.
+     */
     data->pdev = platform_device_register_simple(DRVNAME, -1, NULL, 0);
     if (IS_ERR(data->pdev)) {
         ret = PTR_ERR(data->pdev);
@@ -332,13 +347,18 @@ static int __init as1813_128o_sys_init(void)
     if (ret)
         goto ipmi_err;
 
+    ret = platform_driver_register(&as1813_128o_sys_driver);
+    if (ret < 0) {
+        goto dri_reg_err;
+    }
+
     return 0;
 
+dri_reg_err:
+    ipmi_destroy_user(data->ipmi.user);
 ipmi_err:
     platform_device_unregister(data->pdev);
 dev_reg_err:
-    platform_driver_unregister(&as1813_128o_sys_driver);
-dri_reg_err:
     kfree(data);
 alloc_err:
     return ret;
@@ -346,9 +366,9 @@ alloc_err:
 
 static void __exit as1813_128o_sys_exit(void)
 {
+    platform_driver_unregister(&as1813_128o_sys_driver);
     ipmi_destroy_user(data->ipmi.user);
     platform_device_unregister(data->pdev);
-    platform_driver_unregister(&as1813_128o_sys_driver);
     kfree(data);
 }
 
