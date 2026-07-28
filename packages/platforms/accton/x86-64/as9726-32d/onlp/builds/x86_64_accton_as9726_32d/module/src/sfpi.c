@@ -383,10 +383,6 @@ int onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
 					if (status_byte & QSFP_DD_FLAT_MEM) {
 						return ONLP_STATUS_E_UNSUPPORTED;
 					}
-					if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_BANK_SELECT, 0)) < 0) {
-						syslog(LOG_ERR, "Failed to set Bank 0, unable to write tx_disable status to port(%d)", port);
-						return ONLP_STATUS_E_INTERNAL;
-					}
 					if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_PAGE_SELECT, QSFP_DD_PAGE_ADVERTISING)) < 0) {
 						syslog(LOG_ERR, "Failed to switch to Advertising Page on port(%d)", port);
 						goto restore;
@@ -398,7 +394,7 @@ int onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
 					}
 					if (support_ctrls & QSFP_DD_P01H_TX_DISABLE_SUPPORT) {
 						if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_BANK_SELECT, 0)) < 0) {
-							syslog(LOG_ERR, "Failed to set Bank 0 on port(%d)", port);
+							syslog(LOG_ERR, "Failed to set Bank 0, unable to write tx_disable status to port(%d)", port);
 							goto restore;
 						}
 						if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_PAGE_SELECT, QSFP_DD_PAGE_LANE_CTRL)) < 0) {
@@ -422,7 +418,6 @@ int onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
 					}
 
 					if (rv < 0) {
-						syslog(LOG_ERR, "Unable to write tx_disable status to port(%d)", port);
 						rv = (rv == ONLP_STATUS_E_UNSUPPORTED) ? rv : ONLP_STATUS_E_INTERNAL;
 					} else {
 						rv = ONLP_STATUS_OK;
@@ -474,7 +469,7 @@ int onlp_sfpi_control_set(int port, onlp_sfp_control_t control, int value)
 
 		if (onlp_file_write_int(value, MODULE_LPMODE_FORMAT,
 					bus, addr, (port + 1)) < 0) {
-			syslog(LOG_ERR, "Unable to set lp mode to port(%d)", 
+			syslog(LOG_ERR, "Unable to set LP mode to port(%d)", 
 				      port);
 			rv = ONLP_STATUS_E_INTERNAL;
 		} else {
@@ -554,10 +549,6 @@ int onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
 					if (status_byte & QSFP_DD_FLAT_MEM) {
 						return ONLP_STATUS_E_UNSUPPORTED;
 					}
-					if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_BANK_SELECT, 0)) < 0) {
-						syslog(LOG_ERR, "Failed to set Bank 0, unable to read tx_disable status from port(%d)", port);
-						return ONLP_STATUS_E_INTERNAL;
-					}
 					if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_PAGE_SELECT, QSFP_DD_PAGE_ADVERTISING)) < 0) {
 						syslog(LOG_ERR, "Failed to switch to Advertising Page on port(%d)", port);
 						goto restore;
@@ -569,7 +560,7 @@ int onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
 					}
 					if (support_ctrls & QSFP_DD_P01H_TX_DISABLE_SUPPORT) {
 						if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_BANK_SELECT, 0)) < 0) {
-							syslog(LOG_ERR, "Failed to set Bank 0 on port(%d)", port);
+							syslog(LOG_ERR, "Failed to set Bank 0, unable to read tx_disable status from port(%d)", port);
 							goto restore;
 						}
 						if ((rv = onlp_sfpi_dev_writeb(port, PORT_EEPROM_DEVADDR, QSFP_EEPROM_OFFSET_PAGE_SELECT, QSFP_DD_PAGE_LANE_CTRL)) < 0) {
@@ -594,7 +585,6 @@ int onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
 					}
 
 					if (rv < 0) {
-						syslog(LOG_ERR, "Unable to get tx_disable status from port(%d)", port);
 						rv = (rv == ONLP_STATUS_E_UNSUPPORTED) ? rv : ONLP_STATUS_E_INTERNAL;
 					} else {
 						*value = (tx_dis & 0xff);
@@ -647,7 +637,7 @@ int onlp_sfpi_control_get(int port, onlp_sfp_control_t control, int* value)
 
 		if (onlp_file_read_int(value, MODULE_LPMODE_FORMAT,
 					bus, addr, (port + 1)) < 0) {
-			syslog(LOG_ERR, "Unable to get lp mode to port(%d)", 
+			syslog(LOG_ERR, "Unable to get LP mode to port(%d)", 
 				      port);
 			rv = ONLP_STATUS_E_INTERNAL;
 		} else {
